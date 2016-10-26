@@ -1,0 +1,7 @@
+From: Andreas Rottmann <a.rottmann@gmx.at>
+Subject: [WIP] Tweak socket option accessor types
+
+- `get_fd()` now returns `std::io::unix::RawFd`. This seems to be the
+  correct choice for Unix platforms.
+
+- Make curve key and identity accessors operate on binary data.

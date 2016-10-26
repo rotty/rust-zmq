@@ -46,7 +46,7 @@ getsockopt_num!(c_int, i32);
 getsockopt_num!(int64_t, i64);
 getsockopt_num!(uint64_t, u64);
 
-pub fn get_string(sock: *mut c_void, opt: c_int, size: size_t, remove_nulbyte: bool) -> Result<result::Result<String, Vec<u8>>> {
+pub fn get_bytes(sock: *mut c_void, opt: c_int, size: size_t) -> Result<Vec<u8>> {
     let mut size = size;
     let mut value = vec![0u8; size];
 
@@ -61,17 +61,22 @@ pub fn get_string(sock: *mut c_void, opt: c_int, size: size_t, remove_nulbyte: b
     if r == -1i32 {
         Err(errno_to_error())
     } else {
-        if remove_nulbyte {
-            size -= 1;
-        }
         value.truncate(size);
-
-        if let Ok(s) = str::from_utf8(&value) {
-            return Ok(Ok(s.to_string()));
-        }
-
-        Ok(Err(value))
+        Ok(value)
     }
+}
+
+pub fn get_string(sock: *mut c_void, opt: c_int, size: size_t, remove_nulbyte: bool) -> Result<result::Result<String, Vec<u8>>> {
+    let mut value = try!(get_bytes(sock, opt, size));
+
+    if remove_nulbyte {
+        let len = value.len() - 1;
+        value.truncate(len);
+    }
+
+    Ok(str::from_utf8(&value)
+       .map(str::to_string)
+       .map_err(|_| value))
 }
 
 macro_rules! setsockopt_num(
