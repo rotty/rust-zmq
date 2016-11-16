@@ -10,11 +10,15 @@ Rust ZeroMQ bindings.
 Installation
 ------------
 
-Currently, rust-zmq requires ZeroMQ 4.1. For example, on recent
-Debian-based distributions, you can use the following command to get
-the prerequiste headers and library installed:
+Currently, rust-zmq requires ZeroMQ 4.1 or newer. For example, on
+recent Debian-based distributions, you can use the following command
+to get the prerequiste headers and library installed:
 
     apt install libzmq3-dev
+
+If your OS of choice does not provide packages of a new-enough libzmq,
+you will first have to install it from source; see
+<https://github.com/zeromq/libzmq/releases>.
 
 rust-zmq uses [cargo](https://crates.io) to install. Users should add this to
 their `Cargo.toml` file:
@@ -37,22 +41,11 @@ Usage
 extern crate zmq;
 
 fn main() {
-	let mut ctx = zmq::Context::new();
+    let ctx = zmq::Context::new();
 
-	let mut socket = match ctx.socket(zmq::REQ) {
-	  Ok(socket) => { socket },
-	  Err(e) => { panic!(e) }
-	};
-
-	match socket.connect("tcp://127.0.0.1:1234") {
-	  Ok(()) => (),
-	  Err(e) => panic!(e)
-	}
-
-	match socket.send_str("hello world!", 0) {
-	  Ok(()) => (),
-	  Err(e) => panic!(e)
-	}
+    let mut socket = ctx.socket(zmq::REQ).unwrap();
+    socket.connect("tcp://127.0.0.1:1234").unwrap();
+    socket.send_str("hello world!", 0).unwrap();
 }
 ```
 
