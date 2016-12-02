@@ -23,10 +23,21 @@ use std::string::FromUtf8Error;
 use std::{mem, ptr, str, slice};
 use std::sync::Arc;
 
+macro_rules! zmq_try {
+    ($($tt:tt)*) => {{
+        let rc = $($tt)*;
+        if rc == -1 {
+            return Err(::errno_to_error());
+        }
+        rc
+    }}
+}
+
 mod sockopt;
 
 pub use SocketType::*;
 
+/// `zmq`-specific Result type.
 pub type Result<T> = result::Result<T, Error>;
 
 /// Socket types
@@ -48,11 +59,15 @@ pub enum SocketType {
 
 impl Copy for SocketType {}
 
-pub static DONTWAIT : i32 = 1;
-pub static SNDMORE : i32 = 2;
+/// Flag for socket `send` methods that specifies non-blocking mode.
+pub static DONTWAIT: i32 = 1;
+/// Flag for socket `send` methods that specifies that more frames of a
+/// multipart message will follow.
+pub static SNDMORE: i32 = 2;
 
+/// Raw 0MQ socket option constants.
 #[allow(non_camel_case_types)]
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Constants {
     ZMQ_AFFINITY                 = 4,
     ZMQ_IDENTITY                 = 5,
@@ -204,6 +219,7 @@ impl Copy for Mechanism {}
 
 const ZMQ_HAUSNUMERO: isize = 156384712;
 
+/// An error returned by a 0MQ API function.
 #[derive(Clone, Eq, PartialEq)]
 pub enum Error {
     EACCES          = libc::EACCES as isize,
@@ -316,7 +332,22 @@ impl std::fmt::Display for Error {
     }
 }
 
-// Return the current zeromq version.
+impl fmt::Debug for Error {
+    /// Return the error string for an error.
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        unsafe {
+            let s = zmq_sys::zmq_strerror(*self as c_int);
+            write!(f, "{}",
+                   str::from_utf8(ffi::CStr::from_ptr(s).to_bytes()).unwrap())
+        }
+    }
+}
+
+fn errno_to_error() -> Error {
+    Error::from_raw(unsafe { zmq_sys::zmq_errno() })
+}
+
+/// Return the current zeromq version, as `(major, minor, patch)`.
 pub fn version() -> (i32, i32, i32) {
     let mut major = 0;
     let mut minor = 0;
@@ -329,17 +360,14 @@ pub fn version() -> (i32, i32, i32) {
     (major as i32, minor as i32, patch as i32)
 }
 
-pub struct RawContext {
+struct RawContext {
     ctx: *mut c_void,
 }
 
 impl RawContext {
     fn destroy(&self) -> Result<()> {
-        if unsafe { zmq_sys::zmq_ctx_destroy(self.ctx) } == -1i32 {
-            Err(errno_to_error())
-        } else {
-            Ok(())
-        }
+        zmq_try!(unsafe { zmq_sys::zmq_ctx_destroy(self.ctx) });
+        Ok(())
     }
 }
 
@@ -356,7 +384,7 @@ impl Drop for RawContext {
     }
 }
 
-/// Handle for a zmq context, used to create sockets.
+/// Handle for a 0MQ context, used to create sockets.
 ///
 /// It is thread safe, and can be safely cloned and shared. Each clone
 /// references the same underlying C context. Internally, an `Arc` is
@@ -411,7 +439,7 @@ impl Context {
     }
 
     /// Try to destroy the context. This is different than the destructor; the
-    /// destructor will loop when zmq_ctx_destroy returns EINTR
+    /// destructor will loop when zmq_ctx_destroy returns EINTR.
     pub fn destroy(&mut self) -> Result<()> {
         self.raw.destroy()
     }
@@ -423,6 +451,7 @@ impl Default for Context {
     }
 }
 
+/// A socket, the central object in 0MQ.
 pub struct Socket {
     sock: *mut c_void,
     // The `context` field is never accessed, but implicitly does
@@ -437,7 +466,7 @@ unsafe impl Send for Socket {}
 impl Drop for Socket {
     fn drop(&mut self) {
         if self.owned {
-            if unsafe { zmq_sys::zmq_close(self.sock) } == -1i32 {
+            if unsafe { zmq_sys::zmq_close(self.sock) } == -1 {
                 panic!(errno_to_error());
             } else {
                 debug!("socket dropped");
@@ -527,9 +556,10 @@ impl Socket {
         self.sock
     }
 
-    /// Create a Socket from a raw socket pointer. The Socket assumes
-    /// ownership of the pointer and will close the socket when it is
-    /// dropped. The returned socket will not reference any context.
+    /// Create a Socket from a raw socket pointer.
+    ///
+    /// The Socket assumes ownership of the pointer and will close the socket
+    /// when it is dropped. The returned socket will not reference any context.
     pub unsafe fn from_raw(sock: *mut c_void) -> Socket {
         Socket {
             sock: sock,
@@ -538,8 +568,9 @@ impl Socket {
         }
     }
 
-    /// Returns the inner pointer to this Socket.
-    /// **WARNING**
+    /// Return the inner pointer to this Socket.
+    ///
+    /// **WARNING**:
     /// It is your responsibility to make sure that the underlying
     /// memory is not freed too early.
     pub fn as_mut_ptr(&mut self) -> *mut c_void {
@@ -547,52 +578,37 @@ impl Socket {
     }
 
     /// Accept connections on a socket.
-    pub fn bind(&mut self, endpoint: &str) -> Result<()> {
+    pub fn bind(&self, endpoint: &str) -> Result<()> {
         let c_str = ffi::CString::new(endpoint.as_bytes()).unwrap();
-
-        let rc = unsafe {
-            zmq_sys::zmq_bind(self.sock, c_str.as_ptr())
-        };
-
-        if rc == -1i32 { Err(errno_to_error()) } else { Ok(()) }
+        zmq_try!(unsafe { zmq_sys::zmq_bind(self.sock, c_str.as_ptr()) });
+        Ok(())
     }
 
     /// Connect a socket.
-    pub fn connect(&mut self, endpoint: &str) -> Result<()> {
+    pub fn connect(&self, endpoint: &str) -> Result<()> {
         let c_str = ffi::CString::new(endpoint.as_bytes()).unwrap();
-
-        let rc = unsafe {
-            zmq_sys::zmq_connect(self.sock, c_str.as_ptr())
-        };
-
-        if rc == -1i32 { Err(errno_to_error()) } else { Ok(()) }
+        zmq_try!(unsafe { zmq_sys::zmq_connect(self.sock, c_str.as_ptr()) });
+        Ok(())
     }
 
     /// Send a `&[u8]` message.
-    pub fn send(&mut self, data: &[u8], flags: i32) -> Result<()> {
+    pub fn send(&self, data: &[u8], flags: i32) -> Result<()> {
         let msg = try!(Message::from_slice(data));
         self.send_msg(msg, flags)
     }
 
     /// Send a `Message` message.
-    pub fn send_msg(&mut self, mut msg: Message, flags: i32) -> Result<()> {
-        let rc = unsafe {
-            zmq_sys::zmq_msg_send(&mut msg.msg, self.sock, flags as c_int)
-        };
-
-        if rc == -1i32 {
-            Err(errno_to_error())
-        } else {
-            Ok(())
-        }
+    pub fn send_msg(&self, mut msg: Message, flags: i32) -> Result<()> {
+        zmq_try!(unsafe { zmq_sys::zmq_msg_send(&mut msg.msg, self.sock, flags as c_int) });
+        Ok(())
     }
 
-    pub fn send_str(&mut self, data: &str, flags: i32) -> Result<()> {
+    pub fn send_str(&self, data: &str, flags: i32) -> Result<()> {
         self.send(data.as_bytes(), flags)
     }
 
-    pub fn send_multipart(&mut self, parts: &[&[u8]], flags: i32) -> Result<()> {
-        if parts.len() == 0 {
+    pub fn send_multipart(&self, parts: &[&[u8]], flags: i32) -> Result<()> {
+        if parts.is_empty() {
             return Ok(());
         }
         let (last_part, first_parts) = parts.split_last().unwrap();
@@ -607,56 +623,45 @@ impl Socket {
 
     /// Receive a message into a `Message`. The length passed to zmq_msg_recv
     /// is the length of the buffer.
-    pub fn recv(&mut self, msg: &mut Message, flags: i32) -> Result<()> {
-        let rc = unsafe {
-            zmq_sys::zmq_msg_recv(&mut msg.msg, self.sock, flags as c_int)
-        };
-
-        if rc == -1i32 {
-            Err(errno_to_error())
-        } else {
-            Ok(())
-        }
+    pub fn recv(&self, msg: &mut Message, flags: i32) -> Result<()> {
+        zmq_try!(unsafe { zmq_sys::zmq_msg_recv(&mut msg.msg, self.sock, flags as c_int) });
+        Ok(())
     }
 
-    // Receive bytes into a slice. The length passed to zmq_recv is the length of the slice.
-    pub fn recv_into(&mut self, bytes: &mut [u8], flags: i32) -> Result<()> {
-        let rc = unsafe {
-            let bytes_ptr = bytes.as_mut_ptr() as *mut c_void;
-            zmq_sys::zmq_recv(self.sock, bytes_ptr, bytes.len(), flags as c_int)
-        };
-
-        if rc == -1i32 {
-            Err(errno_to_error())
-        } else {
-            Ok(())
-        }
+    /// Receive bytes into a slice. The length passed to `zmq_recv` is the length of the slice. The
+    /// return value is the number of bytes in the message, which may be larger than the length of
+    /// the slice, indicating truncation.
+    pub fn recv_into(&self, bytes: &mut [u8], flags: i32) -> Result<usize> {
+        let bytes_ptr = bytes.as_mut_ptr() as *mut c_void;
+        let rc = zmq_try!(unsafe { zmq_sys::zmq_recv(self.sock, bytes_ptr, bytes.len(), flags as c_int) });
+        Ok(rc as usize)
     }
 
-    pub fn recv_msg(&mut self, flags: i32) -> Result<Message> {
+    /// Receive a message into a fresh `Message`.
+    pub fn recv_msg(&self, flags: i32) -> Result<Message> {
         let mut msg = try!(Message::new());
-        match self.recv(&mut msg, flags) {
-            Ok(()) => Ok(msg),
-            Err(e) => Err(e),
-        }
+        self.recv(&mut msg, flags).map(|_| msg)
     }
 
-    pub fn recv_bytes(&mut self, flags: i32) -> Result<Vec<u8>> {
-        match self.recv_msg(flags) {
-            Ok(msg) => Ok(msg.to_vec()),
-            Err(e) => Err(e),
-        }
+    /// Receive a message as a byte vector.
+    pub fn recv_bytes(&self, flags: i32) -> Result<Vec<u8>> {
+        self.recv_msg(flags).map(|msg| msg.to_vec())
     }
 
-    /// Read a `String` from the socket.
-    pub fn recv_string(&mut self, flags: i32) -> Result<result::Result<String, Vec<u8>>> {
-        match self.recv_bytes(flags) {
-            Ok(msg) => Ok(Ok(String::from_utf8(msg).unwrap_or("".to_string()))),
-            Err(e) => Err(e),
-        }
+    /// Receive a `String` from the socket.
+    ///
+    /// If the received message is not valid UTF-8, it is returned as the original
+    /// Vec in the `Err` part of the inner result.
+    pub fn recv_string(&self, flags: i32) -> Result<result::Result<String, Vec<u8>>> {
+        self.recv_bytes(flags).map(|bytes| String::from_utf8(bytes).map_err(|e| e.into_bytes()))
     }
 
-    pub fn recv_multipart(&mut self, flags: i32) -> Result<Vec<Vec<u8>>> {
+    /// Receive a multipart message from the socket.
+    ///
+    /// Note that this will allocate a new vector for each message part; for
+    /// many applications it will be possible to process the different parts
+    /// sequentially and reuse allocations that way.
+    pub fn recv_multipart(&self, flags: i32) -> Result<Vec<Vec<u8>>> {
         let mut parts: Vec<Vec<u8>> = vec![];
         loop {
             let part = try!(self.recv_bytes(flags));
@@ -688,6 +693,7 @@ impl Socket {
         },
     }
 
+    /// Return the type of this socket.
     pub fn get_socket_type(&self) -> Result<SocketType> {
         sockopt::get(self.sock, Constants::ZMQ_TYPE.to_raw()).map(|ty| {
             match ty {
@@ -707,6 +713,7 @@ impl Socket {
         })
     }
 
+    /// Return true if there are more frames of a multipart message to receive.
     pub fn get_rcvmore(&self) -> Result<bool> {
         sockopt::get(self.sock, Constants::ZMQ_RCVMORE.to_raw())
             .map(|o: i64| o == 1i64 )
@@ -779,6 +786,11 @@ impl Socket {
         sockopt::get_string(self.sock, Constants::ZMQ_ZAP_DOMAIN.to_raw(), 255, true)
     }
 
+    pub fn get_last_endpoint(&self) -> Result<result::Result<String, Vec<u8>>> {
+        // 256 + 9 + 1 = maximum inproc name size (= 256) + "inproc://".len() (= 9), plus null byte
+        sockopt::get_string(self.sock, Constants::ZMQ_LAST_ENDPOINT.to_raw(), 256 + 9 + 1, true)
+    }
+
     #[cfg(ZMQ_HAS_CURVE = "1")]
     // FIXME: there should be no decoding errors, hence the return type can be simplified
     pub fn get_curve_publickey(&self) -> Result<Vec<u8>> {
@@ -833,7 +845,8 @@ impl Socket {
         },
     }
 
-    pub fn as_poll_item<'a>(&'a self, events: i16) -> PollItem<'a> {
+    /// Create a `PollItem` from the socket.
+    pub fn as_poll_item(&self, events: i16) -> PollItem {
         PollItem {
             socket: self.sock,
             fd: 0,
@@ -843,13 +856,25 @@ impl Socket {
         }
     }
 
+    /// Do a call to `zmq_poll` with only this socket.
+    ///
+    /// The return value on success will be either zero (no event) or one (some
+    /// event was signaled).
     pub fn poll(&self, events: i16, timeout_ms: i64) -> Result<i32> {
         poll(&mut [self.as_poll_item(events)], timeout_ms)
     }
 }
 
-const MSG_SIZE: usize = 64;
-
+/// Holds a 0MQ message.
+///
+/// A message is a single frame, either received or created locally and then
+/// sent over the wire. Multipart messages are transmitted as multiple
+/// `Message`s.
+///
+/// In rust-zmq, you aren't required to create message objects if you use the
+/// convenience APIs provided (e.g. `Socket::recv_bytes()` or
+/// `Socket::send_str()`). However, using message objects can make multiple
+/// operations in a loop more efficient, since allocated memory can be reused.
 pub struct Message {
     msg: zmq_sys::zmq_msg_t,
 }
@@ -863,26 +888,24 @@ impl Drop for Message {
     }
 }
 
+impl fmt::Debug for Message {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}", self.deref())
+    }
+}
+
 impl Message {
     /// Create an empty `Message`.
     pub fn new() -> Result<Message> {
-        unsafe {
-            let mut msg = zmq_sys::zmq_msg_t { unnamed_field1: [0; MSG_SIZE] };
-            let rc = zmq_sys::zmq_msg_init(&mut msg);
-
-            if rc == -1i32 { return Err(errno_to_error()); }
-
-            Ok(Message { msg: msg })
-        }
+        let mut msg = zmq_sys::zmq_msg_t::default();
+        zmq_try!(unsafe { zmq_sys::zmq_msg_init(&mut msg) });
+        Ok(Message { msg: msg })
     }
 
     /// Create a `Message` preallocated with `len` uninitialized bytes.
     pub unsafe fn with_capacity_unallocated(len: usize) -> Result<Message> {
-        let mut msg = zmq_sys::zmq_msg_t { unnamed_field1: [0; MSG_SIZE] };
-        let rc = zmq_sys::zmq_msg_init_size(&mut msg, len as size_t);
-
-        if rc == -1i32 { return Err(errno_to_error()); }
-
+        let mut msg = zmq_sys::zmq_msg_t::default();
+        zmq_try!(zmq_sys::zmq_msg_init_size(&mut msg, len as size_t));
         Ok(Message { msg: msg })
     }
 
@@ -904,10 +927,19 @@ impl Message {
         }
     }
 
-    pub fn as_str<'a>(&'a self) -> Option<&'a str> {
+    /// Return the message content as a string slice if it is valid UTF-8.
+    pub fn as_str(&self) -> Option<&str> {
         str::from_utf8(self).ok()
     }
 
+    /// Return the `ZMQ_MORE` flag, which indicates if more parts of a multipart
+    /// message will follow.
+    pub fn get_more(&self) -> bool {
+        let rc = unsafe { zmq_sys::zmq_msg_more(&self.msg as *const _ as *mut _, ) };
+        rc != 0
+    }
+
+    /// Query a message metadata property.
     pub fn gets<'a>(&'a mut self, property: &str) -> Option<&'a str> {
         let c_str = ffi::CString::new(property.as_bytes()).unwrap();
 
@@ -926,11 +958,11 @@ impl Message {
 impl Deref for Message {
     type Target = [u8];
 
-    fn deref<'a>(&'a self) -> &'a [u8] {
+    fn deref(&self) -> &[u8] {
         // This is safe because we're constraining the slice to the lifetime of
         // this message.
         unsafe {
-            let ptr = self.msg.unnamed_field1.as_ptr() as *mut _;
+            let ptr = &self.msg as *const _ as *mut _;
             let data = zmq_sys::zmq_msg_data(ptr);
             let len = zmq_sys::zmq_msg_size(ptr) as usize;
             slice::from_raw_parts(mem::transmute(data), len)
@@ -939,7 +971,7 @@ impl Deref for Message {
 }
 
 impl DerefMut for Message {
-    fn deref_mut<'a>(&'a mut self) -> &'a mut [u8] {
+    fn deref_mut(&mut self) -> &mut [u8] {
         // This is safe because we're constraining the slice to the lifetime of
         // this message.
         unsafe {
@@ -950,10 +982,21 @@ impl DerefMut for Message {
     }
 }
 
-pub static POLLIN : i16 = 1i16;
-pub static POLLOUT : i16 = 2i16;
-pub static POLLERR : i16 = 4i16;
+/// For `poll()`, specifies to signal when a message/some data can be read from
+/// a socket.
+pub static POLLIN: i16 = 1i16;
+/// For `poll()`, specifies to signal when a message/some data can be written to
+/// a socket.
+pub static POLLOUT: i16 = 2i16;
+/// For `poll()`, specifies to signal when an error condition is present on a
+/// socket.  This only applies to non-0MQ sockets.
+pub static POLLERR: i16 = 4i16;
 
+/// Represents a handle that can be `poll()`ed.
+///
+/// This is either a reference to a 0MQ socket, or a standard socket.
+/// Apart from that it contains the requested event mask, and is updated
+/// with the occurred events after `poll()` finishes.
 #[repr(C)]
 pub struct PollItem<'a> {
     socket: *mut c_void,
@@ -964,6 +1007,8 @@ pub struct PollItem<'a> {
 }
 
 impl<'a> PollItem<'a> {
+    /// Construct a PollItem from a non-0MQ socket, given by its file
+    /// descriptor.
     pub fn from_fd(fd: c_int) -> PollItem<'a> {
         PollItem {
             socket: ptr::null_mut(),
@@ -974,62 +1019,76 @@ impl<'a> PollItem<'a> {
         }
     }
 
+    /// Retrieve the events that occurred for this handle.
     pub fn get_revents(&self) -> i16 {
         self.revents
     }
 }
 
-pub fn poll(items: &mut [PollItem], timeout: i64) -> Result<i32,> {
-    unsafe {
-        let rc = zmq_sys::zmq_poll(
-            items.as_mut_ptr() as *mut zmq_sys::zmq_pollitem_t,
-            items.len() as c_int,
-            timeout as c_long);
-
-        if rc == -1i32 {
-            Err(errno_to_error())
-        } else {
-            Ok(rc as i32)
-        }
-    }
+/// Poll for events on multiple sockets.
+///
+/// For every poll item given, the events given in the `events` bitmask are
+/// monitored, and signaled in `revents` when they occur. Any number of poll
+/// items can have events signaled when the function returns.
+///
+/// The given timeout is in milliseconds and can be zero. A timeout of `-1`
+/// indicates to block indefinitely until an event has occurred.
+///
+/// The result, if not `Err`, indicates the number of poll items that have
+/// events signaled.
+pub fn poll(items: &mut [PollItem], timeout: i64) -> Result<i32> {
+    let rc = zmq_try!(unsafe {
+        zmq_sys::zmq_poll(items.as_mut_ptr() as *mut zmq_sys::zmq_pollitem_t,
+                          items.len() as c_int,
+                          timeout as c_long)
+    });
+    Ok(rc as i32)
 }
 
+/// Start a 0MQ proxy in the current thread.
+///
+/// A proxy connects a frontend socket with a backend socket, where the exact
+/// behavior depends on the type of both sockets.
+///
+/// This function only returns (always with an `Err`) when the sockets' context
+/// has been closed.
 pub fn proxy(frontend: &mut Socket,
              backend: &mut Socket) -> Result<()> {
-    unsafe {
-        let rc = zmq_sys::zmq_proxy(frontend.sock, backend.sock, ptr::null_mut());
-
-        if rc == -1i32 {
-            Err(errno_to_error())
-        } else {
-            Ok(())
-        }
-    }
+    zmq_try!(unsafe { zmq_sys::zmq_proxy(frontend.sock, backend.sock, ptr::null_mut()) });
+    Ok(())
 }
 
+/// Start a 0MQ proxy in the current thread, with a capture socket.
+///
+/// The capture socket is sent all messages received on the frontend and backend
+/// sockets.
 pub fn proxy_with_capture(frontend: &mut Socket,
                           backend: &mut Socket,
                           capture: &mut Socket) -> Result<()> {
-    unsafe {
-        let rc = zmq_sys::zmq_proxy(frontend.sock, backend.sock, capture.sock);
+    zmq_try!(unsafe { zmq_sys::zmq_proxy(frontend.sock, backend.sock, capture.sock) });
+    Ok(())
+}
 
-        if rc == -1i32 {
-            Err(errno_to_error())
-        } else {
-            Ok(())
+/// Return true if the used 0MQ library has the given capability.
+///
+/// For older versions of 0MQ that don't have the wrapped `zmq_has` function,
+/// returns `None`.
+///
+/// For a list of capabilities, please consult the `zmq_has` manual page.
+pub fn has(capability: &str) -> Option<bool> {
+    if cfg!(ZMQ_HAS_ZMQ_HAS) {
+        let c_str = ffi::CString::new(capability).unwrap();
+        unsafe {
+            Some(zmq_sys::zmq_has(c_str.as_ptr()) == 1)
         }
+    } else {
+        None
     }
 }
 
-pub fn has(capability: &str) -> bool {
-    let c_str = ffi::CString::new(capability.as_bytes()).unwrap();
-
-    unsafe {
-        zmq_sys::zmq_has(c_str.as_ptr()) == 1
-    }
-}
-
+/// A CURVE key pair generated by 0MQ.
 #[cfg(ZMQ_HAS_CURVE = "1")]
+#[derive(Debug)]
 pub struct CurveKeyPair {
     pub public_key: String,
     pub secret_key: String,
@@ -1037,31 +1096,32 @@ pub struct CurveKeyPair {
 
 #[cfg(ZMQ_HAS_CURVE = "1")]
 impl CurveKeyPair {
+    /// Create a new key pair.
     pub fn new() -> Result<CurveKeyPair> {
-        // Curve keypairs are currently 40 bytes long.
-        let mut ffi_public_key = vec![0u8; 40];
-        let mut ffi_secret_key = vec![0u8; 40];
+        // Curve keypairs are currently 40 bytes long, plus terminating NULL.
+        let mut ffi_public_key = vec![0u8; 41];
+        let mut ffi_secret_key = vec![0u8; 41];
 
-        unsafe {
-            let rc = zmq_sys::zmq_curve_keypair(
+        zmq_try!(unsafe {
+            zmq_sys::zmq_curve_keypair(
                 ffi_public_key.as_mut_ptr() as *mut libc::c_char,
-                ffi_secret_key.as_mut_ptr() as *mut libc::c_char);
+                ffi_secret_key.as_mut_ptr() as *mut libc::c_char)
+        });
 
-            let public_key = String::from_utf8(ffi_public_key).expect("key not utf8");
-            let secret_key = String::from_utf8(ffi_secret_key).expect("key not utf8");
+        ffi_public_key.truncate(40);
+        ffi_secret_key.truncate(40);
 
-            if rc == -1i32 {
-                Err(errno_to_error())
-            } else {
-                Ok(CurveKeyPair {
-                    public_key: public_key,
-                    secret_key: secret_key,
-                })
-            }
-        }
+        let public_key = String::from_utf8(ffi_public_key).expect("key not utf8");
+        let secret_key = String::from_utf8(ffi_secret_key).expect("key not utf8");
+
+        Ok(CurveKeyPair {
+            public_key: public_key,
+            secret_key: secret_key,
+        })
     }
 }
 
+/// Errors that can occur while encoding Z85.
 #[derive(Debug)]
 pub enum EncodeError {
     BadLength,
@@ -1083,6 +1143,21 @@ impl fmt::Display for EncodeError {
     }
 }
 
+impl std::error::Error for EncodeError {
+    fn description(&self) -> &str {
+        match *self {
+            EncodeError::BadLength => "invalid data length",
+            EncodeError::FromUtf8Error(ref e) => e.description(),
+        }
+    }
+}
+
+/// Encode a binary key as Z85 printable text.
+///
+/// Z85 is an encoding similar to Base64, but operates on 4-byte chunks,
+/// which are encoded into 5-byte sequences.
+///
+/// The input slice *must* have a length divisible by 4.
 pub fn z85_encode(data: &[u8]) -> result::Result<String, EncodeError> {
     if data.len() % 4 != 0 {
         return Err(EncodeError::BadLength);
@@ -1102,9 +1177,12 @@ pub fn z85_encode(data: &[u8]) -> result::Result<String, EncodeError> {
     String::from_utf8(dest).map_err(EncodeError::FromUtf8Error)
 }
 
+/// Errors that can occur while decoding Z85.
 #[derive(Debug)]
 pub enum DecodeError {
+    /// The input string slice's length was not a multiple of 5.
     BadLength,
+    /// The input string slice had embedded NUL bytes.
     NulError(ffi::NulError),
 }
 
@@ -1123,6 +1201,21 @@ impl fmt::Display for DecodeError {
     }
 }
 
+impl std::error::Error for DecodeError {
+    fn description(&self) -> &str {
+        match *self {
+            DecodeError::BadLength => "invalid data length",
+            DecodeError::NulError(ref e) => e.description(),
+        }
+    }
+}
+
+/// Decode a binary key from Z85-encoded text.
+///
+/// The input string must have a length divisible by 5.
+///
+/// Note that 0MQ silently accepts characters outside the range defined for
+/// the Z85 encoding.
 pub fn z85_decode(data: &str) -> result::Result<Vec<u8>, DecodeError> {
     if data.len() % 5 != 0 {
         return Err(DecodeError::BadLength);
@@ -1138,19 +1231,4 @@ pub fn z85_decode(data: &str) -> result::Result<Vec<u8>, DecodeError> {
     }
 
     Ok(dest)
-}
-
-impl fmt::Debug for Error {
-    /// Return the error string for an error.
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        unsafe {
-            let s = zmq_sys::zmq_strerror(*self as c_int);
-            write!(f, "{}",
-                   str::from_utf8(ffi::CStr::from_ptr(s).to_bytes()).unwrap())
-        }
-    }
-}
-
-fn errno_to_error() -> Error {
-    Error::from_raw(unsafe { zmq_sys::zmq_errno() })
 }

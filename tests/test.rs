@@ -1,12 +1,131 @@
 extern crate zmq;
 use zmq::*;
 
+fn create_socketpair() -> (Socket, Socket) {
+    let ctx = Context::default();
+
+    let sender = ctx.socket(zmq::REQ).unwrap();
+    let receiver = ctx.socket(zmq::REP).unwrap();
+
+    receiver.bind("tcp://*:*").unwrap();
+    let ep = receiver.get_last_endpoint().unwrap().unwrap();
+    sender.connect(&ep).unwrap();
+
+    (sender, receiver)
+}
+
+#[test]
+fn test_exchanging_messages() {
+    let (sender, receiver) = create_socketpair();
+    sender.send_msg(Message::from_slice(b"foo").unwrap(), 0).unwrap();
+    let msg = receiver.recv_msg(0).unwrap();
+    assert_eq!(&msg[..], b"foo");
+    assert_eq!(msg.as_str(), Some("foo"));
+    assert_eq!(format!("{:?}", msg), "[102, 111, 111]");
+
+    receiver.send(b"bar", 0).unwrap();
+    let mut msg = Message::with_capacity(1).unwrap();
+    sender.recv(&mut msg, 0).unwrap();
+    assert_eq!(&msg[..], b"bar");
+}
+
+#[test]
+fn test_exchanging_bytes() {
+    let (sender, receiver) = create_socketpair();
+    sender.send(b"bar", 0).unwrap();
+    assert_eq!(receiver.recv_bytes(0).unwrap(), b"bar");
+
+    receiver.send(b"a quite long string", 0).unwrap();
+    let mut buf = [0_u8; 10];
+    sender.recv_into(&mut buf, 0).unwrap();  // this should truncate the message
+    assert_eq!(&buf[..], b"a quite lo");
+}
+
+#[test]
+fn test_exchanging_strings() {
+    let (sender, receiver) = create_socketpair();
+    sender.send_str("bäz", 0).unwrap();
+    assert_eq!(receiver.recv_string(0).unwrap().unwrap(), "bäz");
+
+    // non-UTF8 strings -> get an Err with bytes when receiving
+    receiver.send(b"\xff\xb7", 0).unwrap();
+    let result = sender.recv_string(0).unwrap();
+    assert_eq!(result, Err(vec![0xff, 0xb7]));
+}
+
+#[test]
+fn test_exchanging_multipart() {
+    let (sender, receiver) = create_socketpair();
+
+    // convenience API
+    sender.send_multipart(&[b"foo", b"bar"], 0).unwrap();
+    assert_eq!(receiver.recv_multipart(0).unwrap(), vec![b"foo", b"bar"]);
+
+    // manually
+    receiver.send(b"foo", SNDMORE).unwrap();
+    receiver.send(b"bar", 0).unwrap();
+    let msg1 = sender.recv_msg(0).unwrap();
+    assert!(msg1.get_more());
+    assert!(sender.get_rcvmore().unwrap());
+    assert_eq!(&msg1[..], b"foo");
+    let msg2 = sender.recv_msg(0).unwrap();
+    assert!(!msg2.get_more());
+    assert!(!sender.get_rcvmore().unwrap());
+    assert_eq!(&msg2[..], b"bar");
+}
+
+#[test]
+fn test_polling() {
+    let (sender, receiver) = create_socketpair();
+
+    // no message yet
+    assert_eq!(receiver.poll(POLLIN, 1).unwrap(), 0);
+
+    // send message
+    sender.send(b"Hello!", 0).unwrap();
+    let mut poll_items = vec![receiver.as_poll_item(POLLIN)];
+    assert_eq!(poll(&mut poll_items, 1).unwrap(), 1);
+    assert_eq!(poll_items[0].get_revents(), POLLIN);
+}
+
 #[test]
 fn test_raw_roundtrip() {
     let ctx = Context::new();
+    let mut sock = ctx.socket(SocketType::REQ).unwrap();
 
-    let raw = ctx.socket(SocketType::REQ).unwrap().into_raw();;
+    let ptr = sock.as_mut_ptr();  // doesn't consume the socket
+    // NOTE: the socket will give up its context referecnce, but because we
+    // still hold a reference in `ctx`, we won't get a deadlock.
+    let raw = sock.into_raw();    // consumes the socket
+    assert_eq!(ptr, raw);
     let _ = unsafe { Socket::from_raw(raw) };
+}
+
+#[test]
+fn test_version() {
+    let (major, _, _) = version();
+    assert!(major == 3 || major == 4);
+}
+
+#[test]
+fn test_zmq_error() {
+    use std::error::Error as StdError;
+
+    let ctx = Context::new();
+    let sock = ctx.socket(SocketType::REP).unwrap();
+
+    // cannot send from REP unless we received a message first
+    let err = sock.send(b"...", 0).unwrap_err();
+    assert_eq!(err, Error::EFSM);
+
+    // ZMQ error strings might not be guaranteed, so we'll not check
+    // against specific messages, but still check that formatting does
+    // not segfault, for example, and gives the same strings.
+    let desc = err.description();
+    let display = format!("{}", err);
+    let debug = format!("{:?}", err);
+    assert_eq!(desc, display);
+    assert_eq!(desc, debug);
 }
 
 #[cfg(ZMQ_HAS_CURVE = "1")]
@@ -76,16 +195,16 @@ fn test_getset_affinity() {
 fn test_getset_identity() {
     let ctx = Context::new();
     let sock = ctx.socket(REQ).unwrap();
-    sock.set_identity("moo".as_bytes()).unwrap();
-    assert_eq!(sock.get_identity().unwrap(), "moo".as_bytes());
+    sock.set_identity(b"moo").unwrap();
+    assert_eq!(sock.get_identity().unwrap(), b"moo");
 }
 
 #[test]
 fn test_subscription() {
     let ctx = Context::new();
     let sock = ctx.socket(SUB).unwrap();
-    assert!(sock.set_subscribe("/channel".as_bytes()).is_ok());
-    assert!(sock.set_unsubscribe("/channel".as_bytes()).is_ok());
+    assert!(sock.set_subscribe(b"/channel").is_ok());
+    assert!(sock.set_unsubscribe(b"/channel").is_ok());
 }
 
 #[test]
@@ -193,7 +312,7 @@ fn test_getset_ipv6() {
     assert!(sock.is_ipv6().unwrap());
 
     sock.set_ipv6(false).unwrap();
-    assert!(sock.is_ipv6().unwrap() == false);
+    assert!(!sock.is_ipv6().unwrap());
 }
 
 #[test]
@@ -268,7 +387,7 @@ fn test_getset_immediate() {
     assert!(sock.is_immediate().unwrap());
 
     sock.set_immediate(false).unwrap();
-    assert!(sock.is_immediate().unwrap() == false);
+    assert!(!sock.is_immediate().unwrap());
 }
 
 #[test]
@@ -280,7 +399,7 @@ fn test_getset_plain_server() {
     assert!(sock.is_plain_server().unwrap());
 
     sock.set_plain_server(false).unwrap();
-    assert!(sock.is_plain_server().unwrap() == false);
+    assert!(!sock.is_plain_server().unwrap());
 }
 
 #[test]
