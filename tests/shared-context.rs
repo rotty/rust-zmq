@@ -21,7 +21,7 @@ fn shared_context(address: &str) {
     let endpoint = push_socket.get_last_endpoint().unwrap().unwrap();
     let worker1 = fork(&ctx, endpoint);
 
-    push_socket.send(b"Message1", 0).unwrap();
+    push_socket.send(b"Message1", zmq::MsgIoFlags::empty()).unwrap();
 
     worker1.join().unwrap();
 }
@@ -35,7 +35,7 @@ fn worker(ctx: &zmq::Context, endpoint: &str) {
     let pull_socket = connect_socket(ctx, zmq::PULL, endpoint).unwrap();
 
     let mut msg = zmq::Message::new().unwrap();
-    pull_socket.recv(&mut msg, 0).unwrap();
+    pull_socket.recv(&mut msg, zmq::NOFLAGS).unwrap();
     assert_eq!(&msg[..], b"Message1");
 }
 

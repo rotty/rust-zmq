@@ -27,11 +27,11 @@ fn worker_task() {
     loop {
         // Tell the broker we're ready for work
         worker.send(b"", SNDMORE).unwrap();
-        worker.send_str("Hi boss!", 0).unwrap();
+        worker.send_str("Hi boss!", zmq::NOFLAGS).unwrap();
 
         // Get workload from broker, until finished
-        worker.recv_bytes(0).unwrap();  // envelope delimiter
-        let workload = worker.recv_string(0).unwrap().unwrap();
+        worker.recv_bytes(zmq::NOFLAGS).unwrap();  // envelope delimiter
+        let workload = worker.recv_string(zmq::NOFLAGS).unwrap().unwrap();
         if workload == "Fired!" {
             println!("Worker {} completed {} tasks", hex(&identity), total);
             break;
@@ -67,18 +67,18 @@ fn main() {
     let mut workers_fired = 0;
     loop {
         // Next message gives us least recently used worker
-        let identity = broker.recv_bytes(0).unwrap();
+        let identity = broker.recv_bytes(zmq::NOFLAGS).unwrap();
         broker.send(&identity, SNDMORE).unwrap();
 
-        broker.recv_bytes(0).unwrap(); // Envelope
-        broker.recv_bytes(0).unwrap(); // Response from worker
+        broker.recv_bytes(zmq::NOFLAGS).unwrap(); // Envelope
+        broker.recv_bytes(zmq::NOFLAGS).unwrap(); // Response from worker
         broker.send(b"", SNDMORE).unwrap();
 
         // Encourage workers until it's time to fire them
         if start_time.elapsed() < allowed_duration {
-            broker.send_str("Work harder", 0).unwrap();
+            broker.send_str("Work harder", zmq::NOFLAGS).unwrap();
         } else {
-            broker.send_str("Fired!", 0).unwrap();
+            broker.send_str("Fired!", zmq::NOFLAGS).unwrap();
             workers_fired += 1;
             if workers_fired >= worker_pool_size {
                 break;

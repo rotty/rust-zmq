@@ -18,7 +18,7 @@ fn server(pull_socket: zmq::Socket, push_socket: zmq::Socket, mut workers: u64) 
     let mut msg = zmq::Message::new().unwrap();
 
     while workers != 0 {
-        pull_socket.recv(&mut msg, 0).unwrap();
+        pull_socket.recv(&mut msg, zmq::NOFLAGS).unwrap();
         let s = msg.as_str().unwrap();
         if s.is_empty() {
             workers -= 1;
@@ -27,7 +27,7 @@ fn server(pull_socket: zmq::Socket, push_socket: zmq::Socket, mut workers: u64) 
         }
     }
 
-    push_socket.send_str(&count.to_string(), 0).unwrap();
+    push_socket.send_str(&count.to_string(), zmq::NOFLAGS).unwrap();
 }
 
 fn spawn_server(ctx: &mut zmq::Context, workers: u64) -> Sender<()> {
@@ -59,11 +59,11 @@ fn spawn_server(ctx: &mut zmq::Context, workers: u64) -> Sender<()> {
 
 fn worker(push_socket: zmq::Socket, count: u64) {
     for _ in 0 .. count {
-        push_socket.send_str(&100.to_string(), 0).unwrap();
+        push_socket.send_str(&100.to_string(), zmq::NOFLAGS).unwrap();
     }
 
     // Let the server know we're done.
-    push_socket.send_str("", 0).unwrap();
+    push_socket.send_str("", zmq::NOFLAGS).unwrap();
 }
 
 fn spawn_worker(ctx: &mut zmq::Context, count: u64) -> Receiver<()> {
@@ -117,7 +117,7 @@ fn run(ctx: &mut zmq::Context, size: u64, workers: u64) {
     }
 
     // Receive the final count.
-    let msg = pull_socket.recv_msg(0).unwrap();
+    let msg = pull_socket.recv_msg(zmq::NOFLAGS).unwrap();
     let result = msg.as_str().unwrap().parse::<i32>().unwrap();
 
     let elapsed = start.elapsed();

@@ -9,7 +9,7 @@ extern crate zmq;
 extern crate tempfile;
 extern crate rand;
 
-use zmq::SNDMORE;
+use zmq::{SNDMORE, NOFLAGS};
 use std::thread;
 use std::io::{Seek, SeekFrom, Write, Read, Error};
 use rand::Rng;
@@ -46,11 +46,11 @@ fn client_thread(expected_total: usize) {
             // Ask for next chunk
             dealer.send_str("fetch", SNDMORE).unwrap();
             dealer.send_str(&offset.to_string(), SNDMORE).unwrap();
-            dealer.send_str(CHUNK_SIZE_STR, 0).unwrap();
+            dealer.send_str(CHUNK_SIZE_STR, NOFLAGS).unwrap();
             offset += CHUNK_SIZE;
             credit -= 1;
         }
-        let chunk = dealer.recv_string(0).unwrap().unwrap();
+        let chunk = dealer.recv_string(zmq::NOFLAGS).unwrap().unwrap();
         if chunk.is_empty() {
             clean_break = true;  //  Shutting down, quit
         }
@@ -85,21 +85,21 @@ fn server_thread(file: &mut File) -> Result<(), Error> {
 
     loop {
         // First frame in each message is the sender identity
-        let identity = router.recv_bytes(0).unwrap();
+        let identity = router.recv_bytes(zmq::NOFLAGS).unwrap();
         if identity.is_empty() {
             break;              //  Shutting down, quit
         }
 
         // Second frame is "fetch" command
-        let command = router.recv_string(0).unwrap().unwrap();
+        let command = router.recv_string(zmq::NOFLAGS).unwrap().unwrap();
         assert!(command == "fetch");
 
         // Third frame is chunk offset in file
-        let offset = router.recv_string(0).unwrap().unwrap();
+        let offset = router.recv_string(zmq::NOFLAGS).unwrap().unwrap();
         let offset = offset.parse::<u64>().unwrap();
 
         // Fourth frame is maximum chunk size
-        let chunk_size = router.recv_string(0).unwrap().unwrap();
+        let chunk_size = router.recv_string(zmq::NOFLAGS).unwrap().unwrap();
         let chunk_size = chunk_size.parse::<usize>().unwrap();
 
         // Seek to offset
@@ -111,7 +111,7 @@ fn server_thread(file: &mut File) -> Result<(), Error> {
 
         // Send resulting chunk to client
         router.send(&identity, SNDMORE).unwrap();
-        router.send(&data, 0).unwrap();
+        router.send(&data, zmq::NOFLAGS).unwrap();
     }
     Ok(())
 }

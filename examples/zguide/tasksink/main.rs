@@ -16,13 +16,13 @@ fn main() {
     assert!(receiver.bind("tcp://*:5558").is_ok());
 
     // Wait for start of batch
-    receiver.recv_bytes(0).unwrap();
+    receiver.recv_bytes(zmq::NOFLAGS).unwrap();
 
     //  Start our clock now
     let start = Instant::now();
 
     for task_nbr in 0..100 {
-        receiver.recv_bytes(0).unwrap();
+        receiver.recv_bytes(zmq::NOFLAGS).unwrap();
 
         if task_nbr % 10 == 0 {
             print!(":");

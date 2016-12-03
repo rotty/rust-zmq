@@ -16,9 +16,9 @@ fn main() {
 
     for request_nbr in 0..10 {
         println!("Sending Hello {}...", request_nbr);
-        requester.send(b"Hello", 0).unwrap();
+        requester.send(b"Hello", zmq::NOFLAGS).unwrap();
 
-        requester.recv(&mut msg, 0).unwrap();
+        requester.recv(&mut msg, zmq::NOFLAGS).unwrap();
         println!("Received World {}: {}", msg.as_str().unwrap(), request_nbr);
     }
 }

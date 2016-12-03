@@ -17,39 +17,39 @@ fn create_socketpair() -> (Socket, Socket) {
 #[test]
 fn test_exchanging_messages() {
     let (sender, receiver) = create_socketpair();
-    sender.send_msg(Message::from_slice(b"foo").unwrap(), 0).unwrap();
-    let msg = receiver.recv_msg(0).unwrap();
+    sender.send_msg(Message::from_slice(b"foo").unwrap(), zmq::NOFLAGS).unwrap();
+    let msg = receiver.recv_msg(zmq::NOFLAGS).unwrap();
     assert_eq!(&msg[..], b"foo");
     assert_eq!(msg.as_str(), Some("foo"));
     assert_eq!(format!("{:?}", msg), "[102, 111, 111]");
 
-    receiver.send(b"bar", 0).unwrap();
+    receiver.send(b"bar", zmq::NOFLAGS).unwrap();
     let mut msg = Message::with_capacity(1).unwrap();
-    sender.recv(&mut msg, 0).unwrap();
+    sender.recv(&mut msg, zmq::NOFLAGS).unwrap();
     assert_eq!(&msg[..], b"bar");
 }
 
 #[test]
 fn test_exchanging_bytes() {
     let (sender, receiver) = create_socketpair();
-    sender.send(b"bar", 0).unwrap();
-    assert_eq!(receiver.recv_bytes(0).unwrap(), b"bar");
+    sender.send(b"bar", zmq::NOFLAGS).unwrap();
+    assert_eq!(receiver.recv_bytes(zmq::NOFLAGS).unwrap(), b"bar");
 
-    receiver.send(b"a quite long string", 0).unwrap();
+    receiver.send(b"a quite long string", zmq::NOFLAGS).unwrap();
     let mut buf = [0_u8; 10];
-    sender.recv_into(&mut buf, 0).unwrap();  // this should truncate the message
+    sender.recv_into(&mut buf, zmq::NOFLAGS).unwrap();  // this should truncate the message
     assert_eq!(&buf[..], b"a quite lo");
 }
 
 #[test]
 fn test_exchanging_strings() {
     let (sender, receiver) = create_socketpair();
-    sender.send_str("bäz", 0).unwrap();
-    assert_eq!(receiver.recv_string(0).unwrap().unwrap(), "bäz");
+    sender.send_str("bäz", zmq::NOFLAGS).unwrap();
+    assert_eq!(receiver.recv_string(zmq::NOFLAGS).unwrap().unwrap(), "bäz");
 
     // non-UTF8 strings -> get an Err with bytes when receiving
-    receiver.send(b"\xff\xb7", 0).unwrap();
-    let result = sender.recv_string(0).unwrap();
+    receiver.send(b"\xff\xb7", zmq::NOFLAGS).unwrap();
+    let result = sender.recv_string(zmq::NOFLAGS).unwrap();
     assert_eq!(result, Err(vec![0xff, 0xb7]));
 }
 
@@ -58,17 +58,17 @@ fn test_exchanging_multipart() {
     let (sender, receiver) = create_socketpair();
 
     // convenience API
-    sender.send_multipart(&[b"foo", b"bar"], 0).unwrap();
-    assert_eq!(receiver.recv_multipart(0).unwrap(), vec![b"foo", b"bar"]);
+    sender.send_multipart(&[b"foo", b"bar"], zmq::NOFLAGS).unwrap();
+    assert_eq!(receiver.recv_multipart(zmq::NOFLAGS).unwrap(), vec![b"foo", b"bar"]);
 
     // manually
     receiver.send(b"foo", SNDMORE).unwrap();
-    receiver.send(b"bar", 0).unwrap();
-    let msg1 = sender.recv_msg(0).unwrap();
+    receiver.send(b"bar", zmq::NOFLAGS).unwrap();
+    let msg1 = sender.recv_msg(zmq::NOFLAGS).unwrap();
     assert!(msg1.get_more());
     assert!(sender.get_rcvmore().unwrap());
     assert_eq!(&msg1[..], b"foo");
-    let msg2 = sender.recv_msg(0).unwrap();
+    let msg2 = sender.recv_msg(zmq::NOFLAGS).unwrap();
     assert!(!msg2.get_more());
     assert!(!sender.get_rcvmore().unwrap());
     assert_eq!(&msg2[..], b"bar");
@@ -82,7 +82,7 @@ fn test_polling() {
     assert_eq!(receiver.poll(POLLIN, 1).unwrap(), 0);
 
     // send message
-    sender.send(b"Hello!", 0).unwrap();
+    sender.send(b"Hello!", zmq::NOFLAGS).unwrap();
     let mut poll_items = vec![receiver.as_poll_item(POLLIN)];
     assert_eq!(poll(&mut poll_items, 1).unwrap(), 1);
     assert_eq!(poll_items[0].get_revents(), POLLIN);
@@ -115,7 +115,7 @@ fn test_zmq_error() {
     let sock = ctx.socket(SocketType::REP).unwrap();
 
     // cannot send from REP unless we received a message first
-    let err = sock.send(b"...", 0).unwrap_err();
+    let err = sock.send(b"...", zmq::NOFLAGS).unwrap_err();
     assert_eq!(err, Error::EFSM);
 
     // ZMQ error strings might not be guaranteed, so we'll not check

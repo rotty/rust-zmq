@@ -28,7 +28,7 @@ fn main() {
     assert!(sender.connect("tcp://localhost:5558").is_ok());
 
     loop {
-        let string = receiver.recv_string(0).unwrap().unwrap();
+        let string = receiver.recv_string(zmq::NOFLAGS).unwrap().unwrap();
 
         // Show progress
         print!(".");
@@ -38,7 +38,7 @@ fn main() {
         thread::sleep(Duration::from_millis(atoi(&string)));
 
         // Send results to sink
-        sender.send(b"", 0).unwrap();
+        sender.send(b"", zmq::NOFLAGS).unwrap();
      }
 
 }

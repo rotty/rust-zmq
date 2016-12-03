@@ -28,7 +28,7 @@ fn main() {
     let mut total_temp = 0;
 
     for _ in 0 .. 100 {
-        let string = subscriber.recv_string(0).unwrap().unwrap();
+        let string = subscriber.recv_string(zmq::NOFLAGS).unwrap().unwrap();
         let chks: Vec<i64> = string.split(' ').map(atoi).collect();
         let (_zipcode, temperature, _relhumidity) = (chks[0], chks[1], chks[2]);
         total_temp += temperature;

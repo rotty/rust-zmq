@@ -17,9 +17,9 @@ fn main() {
 
     let mut msg = zmq::Message::new().unwrap();
     loop {
-        responder.recv(&mut msg, 0).unwrap();
+        responder.recv(&mut msg, zmq::NOFLAGS).unwrap();
         println!("Received {}", msg.as_str().unwrap());
         thread::sleep(Duration::from_millis(1000));
-        responder.send_str("World", 0).unwrap();
+        responder.send_str("World", zmq::NOFLAGS).unwrap();
     }
 }
