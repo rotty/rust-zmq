@@ -643,6 +643,10 @@ impl Socket {
         Ok(parts)
     }
 
+    pub fn recv_iter<'a>(&'a mut self, flags: i32) -> MultiRecv<'a>  {
+        MultiRecv { socket: self, flags: flags, more: true }
+    }
+
     sockopts! {
         /// Accessor for the `ZMQ_IPV6` option.
         (is_ipv6, set_ipv6) => ZMQ_IPV6 as bool,
@@ -830,6 +834,30 @@ impl Socket {
     }
 }
 
+pub struct MultiRecv<'a> {
+    more: bool,
+    flags: i32,
+    socket: &'a Socket,
+}
+
+impl<'a> Iterator for MultiRecv<'a> {
+    type Item = Result<Message>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.more {
+            match self.socket.recv_msg(self.flags) {
+                Err(e) => Some(Err(e)),
+                Ok(msg) => {
+                    self.more = msg.get_more();
+                    Some(Ok(msg))
+                }
+            }
+        } else {
+            None
+        }
+    }
+}
+
 /// Holds a 0MQ message.
 ///
 /// A message is a single frame, either received or created locally and then
@@ -982,6 +1010,12 @@ impl<'a, T> From<&'a T> for Message
 {
     fn from(v: &'a T) -> Self {
         v.clone().into()
+    }
+}
+
+impl Into<Vec<u8>> for Message {
+    fn into(self) -> Vec<u8> {
+        Vec::from(&self[..])
     }
 }
 
