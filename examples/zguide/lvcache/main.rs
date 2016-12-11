@@ -29,8 +29,7 @@ fn main() {
             let topic = frontend.recv_msg(0).unwrap();
             let current = frontend.recv_msg(0).unwrap();
             cache.insert(topic.to_vec(), current.to_vec());
-            backend.send(topic, zmq::SNDMORE).unwrap();
-            backend.send(current, 0).unwrap();
+            backend.send_multipart(vec![topic, current]).unwrap();
         }
         if (items[1].get_revents() & zmq::POLLIN) != 0 {
             // Event is one byte 0=unsub or 1=sub, followed by topic
@@ -39,8 +38,7 @@ fn main() {
                 let topic = &event[1..];
                 println!("Sending cached topic {}", from_utf8(topic).unwrap());
                 if let Some(previous) = cache.get(topic) {
-                    backend.send(topic, zmq::SNDMORE).unwrap();
-                    backend.send(previous, 0).unwrap();
+                    backend.send_multipart([topic, previous].iter()).unwrap();
                 }
             }
         }

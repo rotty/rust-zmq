@@ -5,7 +5,6 @@
 extern crate zmq;
 extern crate rand;
 
-use zmq::SNDMORE;
 use rand::Rng;
 use std::time::{Duration, Instant};
 use std::thread;
@@ -26,8 +25,7 @@ fn worker_task() {
     let mut total = 0;
     loop {
         // Tell the broker we're ready for work
-        worker.send("", SNDMORE).unwrap();
-        worker.send("Hi boss!", 0).unwrap();
+        worker.send_multipart(&["", "Hi boss!"]).unwrap();
 
         // Get workload from broker, until finished
         worker.recv_bytes(0).unwrap();  // envelope delimiter
@@ -66,19 +64,22 @@ fn main() {
     let start_time = Instant::now();
     let mut workers_fired = 0;
     loop {
-        // Next message gives us least recently used worker
-        let identity = broker.recv_bytes(0).unwrap();
-        broker.send(&identity, SNDMORE).unwrap();
-
-        broker.recv_bytes(0).unwrap(); // Envelope
-        broker.recv_bytes(0).unwrap(); // Response from worker
-        broker.send("", SNDMORE).unwrap();
+        // Next message gives us least recently used worker FIXME:
+        // compared to the original code, this now introduces a
+        // potential performance regression of the second part of the
+        // reply
+        {
+            let identity: zmq::Message = broker.recv_msg(0).unwrap();
+            broker.recv_bytes(0).unwrap(); // Envelope
+            broker.recv_bytes(0).unwrap(); // Response from worker
+            broker.send_multipart(vec![identity, "".into()]).unwrap();
+        }
 
         // Encourage workers until it's time to fire them
         if start_time.elapsed() < allowed_duration {
-            broker.send("Work harder", 0).unwrap();
+            broker.send("Work harder").unwrap();
         } else {
-            broker.send("Fired!", 0).unwrap();
+            broker.send("Fired!").unwrap();
             workers_fired += 1;
             if workers_fired >= worker_pool_size {
                 break;

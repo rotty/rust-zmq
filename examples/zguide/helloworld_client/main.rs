@@ -16,7 +16,7 @@ fn main() {
 
     for request_nbr in 0..10 {
         println!("Sending Hello {}...", request_nbr);
-        requester.send("Hello", 0).unwrap();
+        requester.send("Hello").unwrap();
 
         requester.recv(&mut msg, 0).unwrap();
         println!("Received World {}: {}", msg.as_str().unwrap(), request_nbr);

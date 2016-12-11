@@ -482,27 +482,6 @@ macro_rules! sockopts {
     };
 }
 
-/// Sendable over a `Socket`.
-///
-/// A type can implement this trait there is an especially efficient
-/// implementation for sending it as a message over a zmq socket.
-///
-/// If the type needs to be directly passed to `Socket::send()`, but
-/// the overhead of allocating a `Message` instance is not an issue,
-/// `Into<Message>` should be implemented instead.
-///
-pub trait Sendable {
-    fn send(self, socket: &Socket, flags: i32) -> Result<()>;
-}
-
-impl<T> Sendable for T where T: Into<Message> {
-    fn send(self, socket: &Socket, flags: i32) -> Result<()> {
-        let mut msg = self.into();
-        zmq_try!(unsafe { zmq_sys::zmq_msg_send(&mut msg.msg, socket.sock, flags as c_int) });
-        Ok(())
-    }
-}
-
 impl Socket {
     /// Consume the Socket and return the raw socket pointer.
     ///
@@ -553,37 +532,74 @@ impl Socket {
     ///
     /// Due to the provided `From` implementations, this works for
     /// `&[u8]`, `Vec<u8>` and `&str` `Message` itself.
-    pub fn send<T>(&self, data: T, flags: i32) -> Result<()>
-        where T: Sendable
+    pub fn send<T>(&self, data: T) -> Result<()>
+        where T: Into<Message>
     {
-        data.send(self, flags)
+        self._send(data, 0).map_err(|(_, e)| e)
+    }
+
+    fn _send<T>(&self, data: T, flags: i32) -> result::Result<(), (Message, Error)>
+        where T: Into<Message>
+    {
+        let send = |msg: &mut Message| {
+            zmq_try!(unsafe { zmq_sys::zmq_msg_send(&mut msg.msg, self.sock, flags as c_int) });
+            Ok(())
+        };
+        let mut msg = data.into();
+        send(&mut msg).map_err(|e| (msg, e))
     }
 
     /// Send a `Message` message.
     #[deprecated(since="0.9.0", note="Use `send` instead")]
     pub fn send_msg(&self, msg: Message, flags: i32) -> Result<()> {
-        self.send(msg, flags)
+        self._send(msg, flags).map_err(|(_, e)| e)
     }
 
     #[deprecated(since="0.9.0", note="Use `send` instead")]
     pub fn send_str(&self, data: &str, flags: i32) -> Result<()> {
-        self.send(data, flags)
+        self._send(data, flags).map_err(|(_, e)| e)
     }
 
-    pub fn send_multipart<I, T>(&self, iter: I, flags: i32) -> Result<()>
+
+    /// Send a multipart message.
+    ///
+    /// Note that this method does not take a `flags` argument and
+    /// thus does not provide the ability to work in non-blocking
+    /// mode. If you want non-blocking mode, use
+    /// `send_multipart_nb()`.
+    pub fn send_multipart<I, T>(&self, input: I) -> Result<()>
         where I: IntoIterator<Item=T>,
-              T: Sendable
+              T: Into<Message>
+    {
+        self._send_multipart(input, 0).map_err(|(_, _, e)| e)
+    }
+
+    pub fn send_multipart_nb<I, T>(&self, input: I) -> result::Result<(), (Message, I::IntoIter, Error)>
+        where I: IntoIterator<Item=T>,
+              T: Into<Message>
+    {
+        self._send_multipart(input, DONTWAIT)
+    }
+
+    fn _send_multipart<I, T>(&self, input: I, flags: i32) -> result::Result<(), (Message, I::IntoIter, Error)>
+        where I: IntoIterator<Item=T>,
+              T: Into<Message>
     {
         let mut last_part: Option<T> = None;
-        for part in iter {
+        let mut iter = input.into_iter();
+        while let Some(part) = iter.next() {
             let maybe_last = last_part.take();
             if let Some(last) = maybe_last {
-                try!(self.send(last, flags | SNDMORE));
+                let msg = last.into();
+                match self._send(msg, flags | SNDMORE) {
+                    Ok(_) => {},
+                    Err((msg, e)) => return Err((msg, iter, e)),
+                }
             }
             last_part = Some(part);
         }
         if let Some(last) = last_part {
-            self.send(last, flags)
+            self._send(last, flags).map_err(|(msg, e)| (msg, iter, e))
         } else {
             Ok(())
         }
@@ -853,6 +869,18 @@ impl Socket {
 /// A message is a single frame, either received or created locally and then
 /// sent over the wire. Multipart messages are transmitted as multiple
 /// `Message`s.
+///
+/// TODO: This is outdated; work this part of the now-gone `Sendable`
+/// into this text:
+///
+///   Sendable over a `Socket`.
+///
+///   A type can implement this trait there is an especially efficient
+///   implementation for sending it as a message over a zmq socket.
+///
+///   If the type needs to be directly passed to `Socket::send()`, but
+///   the overhead of allocating a `Message` instance is not an issue,
+///   `Into<Message>` should be implemented instead.
 ///
 /// In rust-zmq, you aren't required to create message objects if you use the
 /// convenience APIs provided (e.g. `Socket::recv_bytes()` or

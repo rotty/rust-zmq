@@ -9,7 +9,6 @@ extern crate zmq;
 extern crate tempfile;
 extern crate rand;
 
-use zmq::SNDMORE;
 use std::thread;
 use std::io::{Seek, SeekFrom, Write, Read, Error};
 use rand::Rng;
@@ -44,9 +43,7 @@ fn client_thread(expected_total: usize) {
     loop {
         while (credit > 0) && !clean_break {
             // Ask for next chunk
-            dealer.send("fetch", SNDMORE).unwrap();
-            dealer.send(&offset.to_string(), SNDMORE).unwrap();
-            dealer.send(CHUNK_SIZE_STR, 0).unwrap();
+            dealer.send_multipart(&["fetch", &offset.to_string(), CHUNK_SIZE_STR]).unwrap();
             offset += CHUNK_SIZE;
             credit -= 1;
         }
@@ -110,8 +107,7 @@ fn server_thread(file: &mut File) -> Result<(), Error> {
         data.truncate(size);
 
         // Send resulting chunk to client
-        router.send(&identity, SNDMORE).unwrap();
-        router.send(&data, 0).unwrap();
+        router.send_multipart([identity, data].iter()).unwrap();
     }
     Ok(())
 }

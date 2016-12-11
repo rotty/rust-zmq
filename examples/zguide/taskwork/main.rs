@@ -38,7 +38,7 @@ fn main() {
         thread::sleep(Duration::from_millis(atoi(&string)));
 
         // Send results to sink
-        sender.send("", 0).unwrap();
+        sender.send("").unwrap();
      }
 
 }

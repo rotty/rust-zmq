@@ -27,7 +27,7 @@ fn server(pull_socket: zmq::Socket, push_socket: zmq::Socket, mut workers: u64) 
         }
     }
 
-    push_socket.send(&count.to_string(), 0).unwrap();
+    push_socket.send(&count.to_string()).unwrap();
 }
 
 fn spawn_server(ctx: &mut zmq::Context, workers: u64) -> Sender<()> {
@@ -59,11 +59,11 @@ fn spawn_server(ctx: &mut zmq::Context, workers: u64) -> Sender<()> {
 
 fn worker(push_socket: zmq::Socket, count: u64) {
     for _ in 0 .. count {
-        push_socket.send(&100.to_string(), 0).unwrap();
+        push_socket.send(&100.to_string()).unwrap();
     }
 
     // Let the server know we're done.
-    push_socket.send("", 0).unwrap();
+    push_socket.send("").unwrap();
 }
 
 fn spawn_worker(ctx: &mut zmq::Context, count: u64) -> Receiver<()> {
