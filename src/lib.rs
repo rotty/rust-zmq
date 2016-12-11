@@ -572,18 +572,18 @@ impl Socket {
 
     pub fn send_multipart<I, T>(&self, iter: I, flags: i32) -> Result<()>
         where I: IntoIterator<Item=T>,
-              T: Into<Message>
+              T: Sendable
     {
         let mut last_part: Option<T> = None;
         for part in iter {
             let maybe_last = last_part.take();
             if let Some(last) = maybe_last {
-                try!(self.send(last.into(), flags | SNDMORE));
+                try!(self.send(last, flags | SNDMORE));
             }
             last_part = Some(part);
         }
         if let Some(last) = last_part {
-            self.send(last.into(), flags)
+            self.send(last, flags)
         } else {
             Ok(())
         }
