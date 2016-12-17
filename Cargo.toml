@@ -70,9 +70,10 @@ path = "examples/zguide/weather_server/main.rs"
 
 [features]
 unstable = []
+bench = []
 default = ["zmq_has"]
 zmq_has = [] # zmq_has was added in zeromq 4.1.
-unstable-testing = ["compiletest_rs", "unstable"]
+unstable-testing = ["compiletest_rs", "unstable", "bench"]
 #unstable-testing = ["clippy", "compiletest_rs", "unstable"]
 
 [[example]]
