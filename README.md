@@ -45,7 +45,8 @@ location. If that is not available, the environment variable
 Usage
 -----
 
-`rust-zmq` is a pretty straight forward port of the C API into Rust:
+`rust-zmq` is, for the most part, a pretty straight forward port of
+the C API into Rust:
 
 ```rust
 extern crate zmq;
@@ -61,3 +62,26 @@ fn main() {
 
 You can find more usage examples in
 https://github.com/erickt/rust-zmq/tree/master/examples.
+
+Large areas of the API are indeed a direct mapping from C, with the
+usual adaptions to Rust language features, such as methods, lifetimes,
+richer data types, etc, along with fairly minor tweaks.
+
+In some areas, however, the `rust-zmq` API differs more significantly,
+although the mapping should be pretty obvious for each case. Each of
+these deviations from the C version of the API are done the improve
+the type safety of the Rust binding.
+
+The most significant differences in the 0.8.x series are:
+
+- There are no direct equivalent of `zmq_getsockopt` and
+  `zmq_setsockopt`. These are mapped into a pair of getter and setter
+  methods for each socket options. While this approach ticks the "type
+  safe" box, it sacrifices the ability to abstract over option values
+  (issue #134).
+
+- Sockets internally reference, via an `Arc`, the context they were
+  created from, which means they will keep their context alive. Thus
+  you cannot drop a context to have all sockets indicate an error
+  condition on their current or next interaction. You can still
+  achieve that effect calling `Context::destroy()`.
