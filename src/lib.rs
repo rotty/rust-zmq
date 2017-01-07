@@ -70,66 +70,10 @@ pub static DONTWAIT: i32 = 1;
 /// multipart message will follow.
 pub static SNDMORE: i32 = 2;
 
-/// Raw 0MQ socket option constants.
+
 #[allow(non_camel_case_types,dead_code)]
 #[derive(Clone, Debug, PartialEq)]
 enum Constants {
-    ZMQ_AFFINITY                 = 4,
-    ZMQ_IDENTITY                 = 5,
-    ZMQ_SUBSCRIBE                = 6,
-    ZMQ_UNSUBSCRIBE              = 7,
-    ZMQ_RATE                     = 8,
-    ZMQ_RECOVERY_IVL             = 9,
-    ZMQ_SNDBUF                   = 11,
-    ZMQ_RCVBUF                   = 12,
-    ZMQ_RCVMORE                  = 13,
-    ZMQ_FD                       = 14,
-    ZMQ_EVENTS                   = 15,
-    ZMQ_TYPE                     = 16,
-    ZMQ_LINGER                   = 17,
-    ZMQ_RECONNECT_IVL            = 18,
-    ZMQ_BACKLOG                  = 19,
-    ZMQ_RECONNECT_IVL_MAX        = 21,
-    ZMQ_MAXMSGSIZE               = 22,
-    ZMQ_SNDHWM                   = 23,
-    ZMQ_RCVHWM                   = 24,
-    ZMQ_MULTICAST_HOPS           = 25,
-    ZMQ_RCVTIMEO                 = 27,
-    ZMQ_SNDTIMEO                 = 28,
-    ZMQ_LAST_ENDPOINT            = 32,
-    ZMQ_ROUTER_MANDATORY         = 33,
-    ZMQ_TCP_KEEPALIVE            = 34,
-    ZMQ_TCP_KEEPALIVE_CNT        = 35,
-    ZMQ_TCP_KEEPALIVE_IDLE       = 36,
-    ZMQ_TCP_KEEPALIVE_INTVL      = 37,
-    ZMQ_IMMEDIATE                = 39,
-    ZMQ_XPUB_VERBOSE             = 40,
-    ZMQ_ROUTER_RAW               = 41,
-    ZMQ_IPV6                     = 42,
-    ZMQ_MECHANISM                = 43,
-    ZMQ_PLAIN_SERVER             = 44,
-    ZMQ_PLAIN_USERNAME           = 45,
-    ZMQ_PLAIN_PASSWORD           = 46,
-    ZMQ_CURVE_SERVER             = 47,
-    ZMQ_CURVE_PUBLICKEY          = 48,
-    ZMQ_CURVE_SECRETKEY          = 49,
-    ZMQ_CURVE_SERVERKEY          = 50,
-    ZMQ_PROBE_ROUTER             = 51,
-    ZMQ_REQ_CORRELATE            = 52,
-    ZMQ_REQ_RELAXED              = 53,
-    ZMQ_CONFLATE                 = 54,
-    ZMQ_ZAP_DOMAIN               = 55,
-    ZMQ_ROUTER_HANDOVER          = 56,
-    ZMQ_TOS                      = 57,
-    ZMQ_CONNECT_RID              = 61,
-    ZMQ_GSSAPI_SERVER            = 62,
-    ZMQ_GSSAPI_PRINCIPAL         = 63,
-    ZMQ_GSSAPI_SERVICE_PRINCIPAL = 64,
-    ZMQ_GSSAPI_PLAINTEXT         = 65,
-    ZMQ_HANDSHAKE_IVL            = 66,
-    ZMQ_SOCKS_PROXY              = 68,
-    ZMQ_XPUB_NODROP              = 69,
-
     ZMQ_MSG_MORE                 = 1,
     ZMQ_MSG_SHARED               = 128,
     ZMQ_MSG_MASK                 = 129,
@@ -441,22 +385,22 @@ impl Drop for Socket {
 
 macro_rules! sockopt_getter {
     ( $(#[$meta:meta])*
-      pub $getter:ident => $constant_name:ident as $ty:ty
+      pub $getter:ident => $opt:ty
     ) => {
         $(#[$meta])*
-        pub fn $getter(&self) -> Result<$ty> {
-            <$ty as sockopt::Getter>::get(self.sock, Constants::$constant_name.to_raw())
+        pub fn $getter(&self) -> Result<<$opt as sockopt::Get>::Value> {
+            <$opt as sockopt::Get>::get(self)
         }
     };
 }
 
 macro_rules! sockopt_setter {
     ( $(#[$meta:meta])*
-      pub $setter:ident => $constant_name:ident as $ty:ty
+      pub $setter:ident => $opt:ty
     ) => {
         $(#[$meta])*
-        pub fn $setter(&self, value: $ty) -> Result<()> {
-            <$ty as sockopt::Setter>::set(self.sock, Constants::$constant_name.to_raw(), value)
+        pub fn $setter<'a>(&self, value: <$opt as sockopt::Set<'a>>::Value) -> Result<()> {
+            <$opt as sockopt::Set<'a>>::set(self, value)
         }
     };
 }
@@ -469,34 +413,34 @@ macro_rules! sockopt_seq {
         sockopt_seq!(META { cfg($feature = "1") $($meta)* }, $($inner)*);
         sockopt_seq!(META { $($meta)* }, $($rest)*);
     };
-    ( META { $($meta:meta)* }, $(#[$item_meta:meta])* (_, $setter:ident) => $constant_name:ident as $ty:ty,
+    ( META { $($meta:meta)* }, $(#[$item_meta:meta])* (_, $setter:ident) => $opt:ty,
       $($rest:tt)*
     ) => {
         sockopt_setter! {
             $(#[$meta])* $(#[$item_meta])*
-            pub $setter => $constant_name as $ty
+            pub $setter => $opt
         }
         sockopt_seq!(META { $($meta)* }, $($rest)*);
     };
-    ( META { $($meta:meta)* }, $(#[$item_meta:meta])* ($getter:ident) => $constant_name:ident as $ty:ty,
+    ( META { $($meta:meta)* }, $(#[$item_meta:meta])* ($getter:ident) => $ty:ty,
       $($rest:tt)*
     ) => {
         sockopt_getter! {
             $(#[$meta])* $(#[$item_meta])*
-            pub $getter => $constant_name as $ty
+            pub $getter => $ty
         }
         sockopt_seq!(META { $($meta)* }, $($rest)*);
     };
-    ( META { $($meta:meta)* }, $(#[$item_meta:meta])* ($getter:ident, $setter:ident) => $constant_name:ident as $ty:ty,
+    ( META { $($meta:meta)* }, $(#[$item_meta:meta])* ($getter:ident, $setter:ident) => $opt:ty,
       $($rest:tt)*
     ) => {
         sockopt_getter! {
             $(#[$meta])* $(#[$item_meta])*
-            pub $getter => $constant_name as $ty
+            pub $getter => $opt
         }
         sockopt_setter! {
             $(#[$meta])* $(#[$item_meta])*
-            pub $setter => $constant_name as $ty
+            pub $setter => $opt
         }
         sockopt_seq!(META { $($meta)* }, $($rest)*);
     };
@@ -672,7 +616,8 @@ impl Socket {
 
     sockopts! {
         /// Accessor for the `ZMQ_IPV6` option.
-        (is_ipv6, set_ipv6) => ZMQ_IPV6 as bool,
+        (is_ipv6, set_ipv6) => sockopt::Ipv6,
+        /*
         /// Accessor for the `ZMQ_IMMEDIATE` option.
         (is_immediate, set_immediate) => ZMQ_IMMEDIATE as bool,
         /// Accessor for the `ZMQ_PLAIN_SERVER` option.
@@ -686,11 +631,13 @@ impl Socket {
             (is_gssapi_server, set_gssapi_server) => ZMQ_GSSAPI_SERVER as bool,
             (is_gssapi_plaintext, set_gssapi_plaintext) => ZMQ_GSSAPI_PLAINTEXT as bool,
         },
+         */
     }
 
     /// Return the type of this socket.
+    #[cfg(todo)]
     pub fn get_socket_type(&self) -> Result<SocketType> {
-        sockopt::get(self.sock, Constants::ZMQ_TYPE.to_raw()).map(|ty| {
+        sockopt::get(self.sock, ZMQ_TYPE).map(|ty| {
             match ty {
                 0 => SocketType::PAIR,
                 1 => SocketType::PUB,
@@ -709,12 +656,11 @@ impl Socket {
         })
     }
 
-    /// Return true if there are more frames of a multipart message to receive.
-    pub fn get_rcvmore(&self) -> Result<bool> {
-        sockopt::get(self.sock, Constants::ZMQ_RCVMORE.to_raw())
-            .map(|o: i64| o == 1i64 )
+    sockopts! {
+        (get_rcvmore) => sockopt::Rcvmore,
+        (get_identity, set_identity) => sockopt::Identity,
     }
-
+    #[cfg(todo)]
     sockopts! {
         (get_maxmsgsize, set_maxmsgsize) => ZMQ_MAXMSGSIZE as i64,
         (get_sndhwm, set_sndhwm) => ZMQ_SNDHWM as i32,
@@ -779,22 +725,11 @@ impl Socket {
         (get_tcp_keepalive_idle, set_tcp_keepalive_idle) => ZMQ_TCP_KEEPALIVE_IDLE as i32,
         (get_tcp_keepalive_intvl, set_tcp_keepalive_intvl) => ZMQ_TCP_KEEPALIVE_INTVL as i32,
         (get_handshake_ivl, set_handshake_ivl) => ZMQ_HANDSHAKE_IVL as i32,
-        (_, set_identity) => ZMQ_IDENTITY as &[u8],
         (_, set_subscribe) => ZMQ_SUBSCRIBE as &[u8],
         (_, set_unsubscribe) => ZMQ_UNSUBSCRIBE as &[u8],
     }
 
-    pub fn get_identity(&self) -> Result<Vec<u8>> {
-        // 255 = identity max length
-        sockopt::get_bytes(self.sock, Constants::ZMQ_IDENTITY.to_raw(), 255)
-    }
-
-    pub fn get_socks_proxy(&self) -> Result<result::Result<String, Vec<u8>>> {
-        // 255 = longest allowable domain name is 253 so this should
-        // be a reasonable size.
-        sockopt::get_string(self.sock, Constants::ZMQ_SOCKS_PROXY.to_raw(), 255, true)
-    }
-
+    #[cfg(TODO)]
     pub fn get_mechanism(&self) -> Result<Mechanism> {
         sockopt::get(self.sock, Constants::ZMQ_MECHANISM.to_raw()).map(|mech| {
             match mech {
@@ -822,14 +757,6 @@ impl Socket {
         sockopt::get_string(self.sock, Constants::ZMQ_ZAP_DOMAIN.to_raw(), 255, true)
     }
 
-    /// Return the address of the last endpoint this socket was bound to.
-    ///
-    /// Note that the returned address is not guaranteed to be the
-    /// same as the one used with `bind`, and might also not be
-    /// directly usable with `connect`. In particular, when `bind` is
-    /// used with the wildcard address (`"*"`), in the address
-    /// returned, the wildcard will be expanded into the any address
-    /// (i.e. `0.0.0.0` with IPv4).
     pub fn get_last_endpoint(&self) -> Result<result::Result<String, Vec<u8>>> {
         // 256 + 9 + 1 = maximum inproc name size (= 256) + "inproc://".len() (= 9), plus null byte
         sockopt::get_string(self.sock, Constants::ZMQ_LAST_ENDPOINT.to_raw(), 256 + 9 + 1, true)
@@ -878,14 +805,16 @@ impl Socket {
         sockopt::get_string(self.sock, Constants::ZMQ_GSSAPI_SERVICE_PRINCIPAL.to_raw(), 260, true)
     }
 
+    #[cfg(TODO)]
     sockopts! {
-        (_, set_socks_proxy) => ZMQ_SOCKS_PROXY as Option<&str>,
-        (_, set_plain_username) => ZMQ_PLAIN_USERNAME as Option<&str>,
-        (_, set_plain_password) => ZMQ_PLAIN_PASSWORD as Option<&str>,
-        (_, set_zap_domain) => ZMQ_ZAP_DOMAIN as &str,
+        (get_socket_proxy, set_socks_proxy) => SocksProxy as Option<&str>,
+        (get_plain_username, set_plain_username) => PlainUsername,
+        (get_plain_password, set_plain_password) => PlainPassword,
+        (get_zap_domain, set_zap_domain) => ZapDomain as &str,
 
         if ZMQ_HAS_CURVE {
-            (_, set_curve_publickey) => ZMQ_CURVE_PUBLICKEY as &[u8],
+            (get_curve_publickey, set_curve_publickey)
+                => sockopt::CurvePublicKey as &[u8],
             (_, set_curve_secretkey) => ZMQ_CURVE_SECRETKEY as &[u8],
             (_, set_curve_serverkey) => ZMQ_CURVE_SERVERKEY as &[u8],
         },
@@ -928,14 +857,6 @@ impl Socket {
 pub struct Message {
     msg: zmq_sys::zmq_msg_t,
 }
-
-impl PartialEq for Message {
-    fn eq(&self, other: &Message) -> bool {
-        &self[..] == &other[..]
-    }
-}
-
-impl Eq for Message {}
 
 impl Drop for Message {
     fn drop(&mut self) {
