@@ -5,6 +5,8 @@ use std::os::raw::c_void;
 use std::{mem, ptr, str};
 use std::result;
 
+use zmq_sys::RawFd;
+
 use super::{Result, PollEvents};
 
 pub trait Getter where Self: Sized {
@@ -38,6 +40,7 @@ macro_rules! getsockopt_num(
 );
 
 getsockopt_num!(c_int, i32);
+getsockopt_num!(RawFd, RawFd);
 getsockopt_num!(int64_t, i64);
 getsockopt_num!(uint64_t, u64);
 
