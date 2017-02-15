@@ -36,12 +36,13 @@ macro_rules! zmq_try {
     }}
 }
 
-mod sockopt;
+pub mod sockopt;
 mod message;
 
 pub use SocketType::*;
 pub use message::Message;
 use message::msg_ptr;
+use sockopt::{OptionGet, OptionSet};
 
 /// `zmq`-specific Result type.
 pub type Result<T> = result::Result<T, Error>;
@@ -444,22 +445,22 @@ impl Drop for Socket {
 
 macro_rules! sockopt_getter {
     ( $(#[$meta:meta])*
-      pub $getter:ident => $constant_name:ident as $ty:ty
+      pub $getter:ident => $tag:ident
     ) => {
         $(#[$meta])*
-        pub fn $getter(&self) -> Result<$ty> {
-            <$ty as sockopt::Getter>::get(self.sock, Constants::$constant_name.to_raw())
+        pub fn $getter(&self) -> Result<<sockopt::$tag as OptionGet>::Item> {
+            <sockopt::$tag as OptionGet>::get(self.sock)
         }
     };
 }
 
 macro_rules! sockopt_setter {
     ( $(#[$meta:meta])*
-      pub $setter:ident => $constant_name:ident as $ty:ty
+      pub $setter:ident => $tag:ident
     ) => {
         $(#[$meta])*
-        pub fn $setter(&self, value: $ty) -> Result<()> {
-            <$ty as sockopt::Setter>::set(self.sock, Constants::$constant_name.to_raw(), value)
+        pub fn $setter(&self, value: <sockopt::$tag as OptionSet>::Item) -> Result<()> {
+            <sockopt::$tag as OptionSet>::set(self.sock, value)
         }
     };
 }
@@ -472,34 +473,34 @@ macro_rules! sockopt_seq {
         sockopt_seq!(META { cfg($feature = "1") $($meta)* }, $($inner)*);
         sockopt_seq!(META { $($meta)* }, $($rest)*);
     };
-    ( META { $($meta:meta)* }, $(#[$item_meta:meta])* (_, $setter:ident) => $constant_name:ident as $ty:ty,
+    ( META { $($meta:meta)* }, $(#[$item_meta:meta])* (_, $setter:ident) => $tag:ident,
       $($rest:tt)*
     ) => {
         sockopt_setter! {
             $(#[$meta])* $(#[$item_meta])*
-            pub $setter => $constant_name as $ty
+            pub $setter => $tag
         }
         sockopt_seq!(META { $($meta)* }, $($rest)*);
     };
-    ( META { $($meta:meta)* }, $(#[$item_meta:meta])* ($getter:ident) => $constant_name:ident as $ty:ty,
+    ( META { $($meta:meta)* }, $(#[$item_meta:meta])* ($getter:ident) => $tag:ident,
       $($rest:tt)*
     ) => {
         sockopt_getter! {
             $(#[$meta])* $(#[$item_meta])*
-            pub $getter => $constant_name as $ty
+            pub $getter => $tag
         }
         sockopt_seq!(META { $($meta)* }, $($rest)*);
     };
-    ( META { $($meta:meta)* }, $(#[$item_meta:meta])* ($getter:ident, $setter:ident) => $constant_name:ident as $ty:ty,
+    ( META { $($meta:meta)* }, $(#[$item_meta:meta])* ($getter:ident, $setter:ident) => $tag:ident,
       $($rest:tt)*
     ) => {
         sockopt_getter! {
             $(#[$meta])* $(#[$item_meta])*
-            pub $getter => $constant_name as $ty
+            pub $getter => $tag
         }
         sockopt_setter! {
             $(#[$meta])* $(#[$item_meta])*
-            pub $setter => $constant_name as $ty
+            pub $setter => $tag
         }
         sockopt_seq!(META { $($meta)* }, $($rest)*);
     };
@@ -680,27 +681,35 @@ impl Socket {
         Ok(parts)
     }
 
+    pub fn setopt<T>(&self, value: T::Item) -> Result<()> where T: OptionSet {
+        T::set(self.sock, value)
+    }
+
+    pub fn getopt<T>(&self) -> Result<T::Item> where T: OptionGet {
+        T::get(self.sock)
+    }
+
     sockopts! {
         /// Accessor for the `ZMQ_IPV6` option.
-        (is_ipv6, set_ipv6) => ZMQ_IPV6 as bool,
+        (is_ipv6, set_ipv6) => Ipv6,
         /// Accessor for the `ZMQ_IMMEDIATE` option.
-        (is_immediate, set_immediate) => ZMQ_IMMEDIATE as bool,
-        /// Accessor for the `ZMQ_PLAIN_SERVER` option.
-        (is_plain_server, set_plain_server) => ZMQ_PLAIN_SERVER as bool,
-        /// Accessor for the `ZMQ_CONFLATE` option.
-        (is_conflate, set_conflate) => ZMQ_CONFLATE as bool,
-        (is_probe_router, set_probe_router) => ZMQ_PROBE_ROUTER as bool,
-        (is_router_mandatory, set_router_mandatory) => ZMQ_ROUTER_MANDATORY as bool,
+        (is_immediate, set_immediate) => Immediate,
+        ///Accessor for the `ZMQ_PLAIN_SERVER` option.
+        (is_plain_server, set_plain_server) => PlainServer,
+        ///Accessor for the `ZMQ_CONFLATE` option.
+        (is_conflate, set_conflate) => Conflate,
+        (is_probe_router, set_probe_router) => ProbeRouter,
+        (is_router_mandatory, set_router_mandatory) => RouterMandatory,
         if ZMQ_HAS_CURVE {
-            (is_curve_server, set_curve_server) => ZMQ_CURVE_SERVER as bool,
+            (is_curve_server, set_curve_server) => CurveServer,
         },
         if ZMQ_HAS_GSSAPI {
-            (is_gssapi_server, set_gssapi_server) => ZMQ_GSSAPI_SERVER as bool,
-            (is_gssapi_plaintext, set_gssapi_plaintext) => ZMQ_GSSAPI_PLAINTEXT as bool,
+            (is_gssapi_server, set_gssapi_server) => GssapiServer,
+            (is_gssapi_plaintext, set_gssapi_plaintext) => GssapiPlaintext,
         },
     }
 
-    /// Return the type of this socket.
+    ///Return the type of this socket.
     pub fn get_socket_type(&self) -> Result<SocketType> {
         sockopt::get(self.sock, Constants::ZMQ_TYPE.to_raw()).map(|ty| {
             match ty {
@@ -728,19 +737,19 @@ impl Socket {
     }
 
     sockopts! {
-        (get_maxmsgsize, set_maxmsgsize) => ZMQ_MAXMSGSIZE as i64,
-        (get_sndhwm, set_sndhwm) => ZMQ_SNDHWM as i32,
-        (get_rcvhwm, set_rcvhwm) => ZMQ_RCVHWM as i32,
-        (get_affinity, set_affinity) => ZMQ_AFFINITY as u64,
-        (get_rate, set_rate) => ZMQ_RATE as i32,
-        (get_recovery_ivl, set_recovery_ivl) => ZMQ_RECOVERY_IVL as i32,
-        (get_sndbuf, set_sndbuf) => ZMQ_SNDBUF as i32,
-        (get_rcvbuf, set_rcvbuf) => ZMQ_RCVBUF as i32,
-        (get_tos, set_tos) => ZMQ_TOS as i32,
-        (get_linger, set_linger) => ZMQ_LINGER as i32,
-        (get_reconnect_ivl, set_reconnect_ivl) => ZMQ_RECONNECT_IVL as i32,
-        (get_reconnect_ivl_max, set_reconnect_ivl_max) => ZMQ_RECONNECT_IVL_MAX as i32,
-        (get_backlog, set_backlog) => ZMQ_BACKLOG as i32,
+        (get_maxmsgsize, set_maxmsgsize) => MaxMsgSize,
+        (get_sndhwm, set_sndhwm) => Sndhwm,
+        (get_rcvhwm, set_rcvhwm) => Rcvhwm,
+        (get_affinity, set_affinity) => Affinity,
+        (get_rate, set_rate) => Rate,
+        (get_recovery_ivl, set_recovery_ivl) => RecoveryIvl,
+        (get_sndbuf, set_sndbuf) => Sndbuf,
+        (get_rcvbuf, set_rcvbuf) => Rcvbuf,
+        (get_tos, set_tos) => Tos,
+        (get_linger, set_linger) => Linger,
+        (get_reconnect_ivl, set_reconnect_ivl) => ReconnectIvl,
+        (get_reconnect_ivl_max, set_reconnect_ivl_max) => ReconnectIvlMax,
+        (get_backlog, set_backlog) => Backlog,
 
         /// Get the event notification file descriptor.
         ///
@@ -752,7 +761,7 @@ impl Socket {
         /// Note that the returned file desciptor has special
         /// semantics: it should only used with an operating system
         /// facility like Unix `poll()` to check its readability.
-        (get_fd) => ZMQ_FD as RawFd,
+        (get_fd) => Fd,
 
         /// Get the currently pending events.
         ///
@@ -781,30 +790,19 @@ impl Socket {
         /// along.
         ///
         /// In the `0.9` series, this will be rectified.
-        (get_events) => ZMQ_EVENTS as PollEvents,
+        (get_events) => Events,
 
-        (get_multicast_hops, set_multicast_hops) => ZMQ_MULTICAST_HOPS as i32,
-        (get_rcvtimeo, set_rcvtimeo) => ZMQ_RCVTIMEO as i32,
-        (get_sndtimeo, set_sndtimeo) => ZMQ_SNDTIMEO as i32,
-        (get_tcp_keepalive, set_tcp_keepalive) => ZMQ_TCP_KEEPALIVE as i32,
-        (get_tcp_keepalive_cnt, set_tcp_keepalive_cnt) => ZMQ_TCP_KEEPALIVE_CNT as i32,
-        (get_tcp_keepalive_idle, set_tcp_keepalive_idle) => ZMQ_TCP_KEEPALIVE_IDLE as i32,
-        (get_tcp_keepalive_intvl, set_tcp_keepalive_intvl) => ZMQ_TCP_KEEPALIVE_INTVL as i32,
-        (get_handshake_ivl, set_handshake_ivl) => ZMQ_HANDSHAKE_IVL as i32,
-        (_, set_identity) => ZMQ_IDENTITY as &[u8],
-        (_, set_subscribe) => ZMQ_SUBSCRIBE as &[u8],
-        (_, set_unsubscribe) => ZMQ_UNSUBSCRIBE as &[u8],
-    }
-
-    pub fn get_identity(&self) -> Result<Vec<u8>> {
-        // 255 = identity max length
-        sockopt::get_bytes(self.sock, Constants::ZMQ_IDENTITY.to_raw(), 255)
-    }
-
-    pub fn get_socks_proxy(&self) -> Result<result::Result<String, Vec<u8>>> {
-        // 255 = longest allowable domain name is 253 so this should
-        // be a reasonable size.
-        sockopt::get_string(self.sock, Constants::ZMQ_SOCKS_PROXY.to_raw(), 255, true)
+        (get_multicast_hops, set_multicast_hops) => MulticastHops,
+        (get_rcvtimeo, set_rcvtimeo) => Rcvtimeo,
+        (get_sndtimeo, set_sndtimeo) => Sndtimeo,
+        (get_tcp_keepalive, set_tcp_keepalive) => TcpKeepalive,
+        (get_tcp_keepalive_cnt, set_tcp_keepalive_cnt) => TcpKeepaliveCnt,
+        (get_tcp_keepalive_idle, set_tcp_keepalive_idle) => TcpKeepaliveIdle,
+        (get_tcp_keepalive_intvl, set_tcp_keepalive_intvl) => TcpKeepaliveIntvl,
+        (get_handshake_ivl, set_handshake_ivl) => HandshakeIvl,
+        (get_identity, set_identity) => Identity,
+        (_, set_subscribe) => Subscribe,
+        (_, set_unsubscribe) => Unsubscribe,
     }
 
     pub fn get_mechanism(&self) -> Result<Mechanism> {
@@ -817,21 +815,6 @@ impl Socket {
                 _ => panic!("Mechanism is out of range!")
             }
         })
-    }
-
-    pub fn get_plain_username(&self) -> Result<result::Result<String, Vec<u8>>> {
-        // 255 = arbitrary size
-        sockopt::get_string(self.sock, Constants::ZMQ_PLAIN_USERNAME.to_raw(), 255, true)
-    }
-
-    pub fn get_plain_password(&self) -> Result<result::Result<String, Vec<u8>>> {
-        // 256 = arbitrary size based on std crypto key size
-        sockopt::get_string(self.sock, Constants::ZMQ_PLAIN_PASSWORD.to_raw(), 256, true)
-    }
-
-    pub fn get_zap_domain(&self) -> Result<result::Result<String, Vec<u8>>> {
-        // 255 = arbitrary size
-        sockopt::get_string(self.sock, Constants::ZMQ_ZAP_DOMAIN.to_raw(), 255, true)
     }
 
     /// Return the address of the last endpoint this socket was bound to.
@@ -847,63 +830,37 @@ impl Socket {
         sockopt::get_string(self.sock, Constants::ZMQ_LAST_ENDPOINT.to_raw(), 256 + 9 + 1, true)
     }
 
-    #[cfg(ZMQ_HAS_CURVE = "1")]
-    /// Set the `ZMQ_CURVE_PUBLICKEY` option value.
-    ///
-    /// The key is returned as raw bytes. Use `z85_encode` on the
-    /// resulting data to get the Z85-encoded string representation of
-    /// the key.
-    pub fn get_curve_publickey(&self) -> Result<Vec<u8>> {
-        sockopt::get_bytes(self.sock, Constants::ZMQ_CURVE_PUBLICKEY.to_raw(), 32)
-    }
+    // #[cfg(ZMQ_HAS_GSSAPI = "1")]
+    // pub fn get_gssapi_principal(&self) -> Result<result::Result<String, Vec<u8>>> {
+    //     // 260 = best guess of max length based on docs.
+    //     sockopt::get_string(self.sock, Constants::ZMQ_GSSAPI_PRINCIPAL.to_raw(), 260, true)
+    // }
 
-    #[cfg(ZMQ_HAS_CURVE = "1")]
-    /// Get the `ZMQ_CURVE_SECRETKEY` option value.
-    ///
-    /// The key is returned as raw bytes. Use `z85_encode` on the
-    /// resulting data to get the Z85-encoded string representation of
-    /// the key.
-    pub fn get_curve_secretkey(&self) -> Result<Vec<u8>> {
-        sockopt::get_bytes(self.sock, Constants::ZMQ_CURVE_SECRETKEY.to_raw(), 32)
-    }
-
-    /// Get `ZMQ_CURVE_SERVERKEY` option value.
-    ///
-    /// Note that the key is returned as raw bytes, as a 32-byte
-    /// vector. Use `z85_encode()` explicitly to obtain the
-    /// Z85-encoded string variant.
-    #[cfg(ZMQ_HAS_CURVE = "1")]
-    pub fn get_curve_serverkey(&self) -> Result<Vec<u8>> {
-        // 41 = Z85 encoded keysize + 1 for null byte
-        sockopt::get_bytes(self.sock, Constants::ZMQ_CURVE_SERVERKEY.to_raw(), 32)
-    }
-
-    #[cfg(ZMQ_HAS_GSSAPI = "1")]
-    pub fn get_gssapi_principal(&self) -> Result<result::Result<String, Vec<u8>>> {
-        // 260 = best guess of max length based on docs.
-        sockopt::get_string(self.sock, Constants::ZMQ_GSSAPI_PRINCIPAL.to_raw(), 260, true)
-    }
-
-    #[cfg(ZMQ_HAS_GSSAPI = "1")]
-    pub fn get_gssapi_service_principal(&self) -> Result<result::Result<String, Vec<u8>>> {
-        // 260 = best guess of max length based on docs.
-        sockopt::get_string(self.sock, Constants::ZMQ_GSSAPI_SERVICE_PRINCIPAL.to_raw(), 260, true)
-    }
+    // #[cfg(ZMQ_HAS_GSSAPI = "1")]
+    // pub fn get_gssapi_service_principal(&self) -> Result<result::Result<String, Vec<u8>>> {
+    //     // 260 = best guess of max length based on docs.
+    //     sockopt::get_string(self.sock, Constants::ZMQ_GSSAPI_SERVICE_PRINCIPAL.to_raw(), 260, true)
+    // }
 
     sockopts! {
-        (_, set_socks_proxy) => ZMQ_SOCKS_PROXY as Option<&str>,
-        (_, set_plain_username) => ZMQ_PLAIN_USERNAME as Option<&str>,
-        (_, set_plain_password) => ZMQ_PLAIN_PASSWORD as Option<&str>,
-        (_, set_zap_domain) => ZMQ_ZAP_DOMAIN as &str,
+        (get_socks_proxy, set_socks_proxy) => SocksProxy,
+        (get_plain_username, set_plain_username) => PlainUsername,
+        (get_plain_password, set_plain_password) => PlainPassword,
+        (get_zap_domain, set_zap_domain) => ZapDomain,
 
         if ZMQ_HAS_CURVE {
-            (_, set_curve_publickey) => ZMQ_CURVE_PUBLICKEY as &[u8],
-            (_, set_curve_secretkey) => ZMQ_CURVE_SECRETKEY as &[u8],
-            (_, set_curve_serverkey) => ZMQ_CURVE_SERVERKEY as &[u8],
+            /// Set the `ZMQ_CURVE_PUBLICKEY` option value.
+            ///
+            /// The key is returned as raw bytes. Use `z85_encode` on the
+            /// resulting data to get the Z85-encoded string representation of
+            /// the key.
+            (get_curve_publickey, set_curve_publickey) => CurvePublickey,
+            (get_curve_secretkey, set_curve_secretkey) => CurveSecretkey,
+            (get_curve_serverkey, set_curve_serverkey) => CurveServerkey,
         },
         if ZMQ_HAS_GSSAPI {
-            (_, set_gssapi_principal) => ZMQ_GSSAPI_PRINCIPAL as &str,
-            (_, set_gssapi_service_principal) => ZMQ_GSSAPI_SERVICE_PRINCIPAL as &str,
+            (get_gssapi_principal, set_gssapi_principal) => GssapiPrincipal,
+            (get_gssapi_service_principal, set_gssapi_service_principal) => GssapiServicePrincipal,
         },
     }
 
