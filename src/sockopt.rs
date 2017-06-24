@@ -152,11 +152,11 @@ getset_opt!(HandshakeIvl, i32, ZMQ_HANDSHAKE_IVL);
 getset_opt!(TcpKeepalive, i32, ZMQ_TCP_KEEPALIVE);
 getset_opt!(TcpKeepaliveCnt, i32, ZMQ_TCP_KEEPALIVE_CNT);
 getset_opt!(TcpKeepaliveIdle, i32, ZMQ_TCP_KEEPALIVE_IDLE);
-getset_opt!(TcpKeepaliveIntvl, i32, ZMQ_TCP_KEEPALIVE);
+getset_opt!(TcpKeepaliveIntvl, i32, ZMQ_TCP_KEEPALIVE_INTVL);
 getset_opt_bytes!(Identity, 255, ZMQ_IDENTITY);
 
 get_opt!(Fd, RawFd, ZMQ_FD);
-get_opt!(Events, PollEvents, ZMQ_FD);
+get_opt!(Events, PollEvents, ZMQ_EVENTS);
 
 set_opt_bytes!(Subscribe, ZMQ_SUBSCRIBE);
 set_opt_bytes!(Unsubscribe, ZMQ_UNSUBSCRIBE);
