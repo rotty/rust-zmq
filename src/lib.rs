@@ -659,8 +659,8 @@ impl Socket {
 
     /// Send a message.
     ///
-    /// Due to the provided `From` implementations, this works for
-    /// `&[u8]`, `Vec<u8>` and `&str` `Message` itself.
+    /// Due to the provided `Sendable` implementations, this works for
+    /// `&[u8]`, `Vec<u8>`, `&str`, and `Message` itself.
     pub fn send<T>(&self, data: T, flags: i32) -> Result<()>
     where
         T: Sendable,
