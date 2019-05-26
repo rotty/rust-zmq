@@ -130,6 +130,47 @@ impl Message {
         }
     }
 
+    /// Construct a `Message` from an iterator with known size.
+    ///
+    /// Since the 0MQ message API does not allow for reallocation, a the
+    /// iterator's size needs to be known beforehand. This is also why there is
+    /// no `FromIterator` implementation for `Message`.
+    ///
+    /// # Panics
+    ///
+    /// The method panics when the passed iterator does not produce exactly as
+    /// many elements as advertised, or the iterator produces more than
+    /// `isize::MAX` elements.
+    #[allow(clippy::should_implement_trait)]
+    pub fn from_iter<I>(iter: I) -> Message
+    where
+        I: IntoIterator<Item = u8>,
+        I::IntoIter: ExactSizeIterator,
+    {
+        let iter = iter.into_iter();
+        let len = iter.len();
+        // This is safe, since we guard against both too few and too many octets
+        // being produced, guarding against uninitialized memory and
+        // out-of-bound writes, respectively.
+        unsafe {
+            let mut msg = Message::with_size_uninit(len);
+            let mut p = msg.as_mut_ptr();
+            let mut count = 0;
+            for octet in iter {
+                if count >= len {
+                    panic!("ExactSizeIterator contract violated: too many items produced");
+                }
+                ptr::write(p, octet);
+                p = p.add(1);
+                count += 1;
+            }
+            if count != len {
+                panic!("ExactSizeIterator contract violated: too few items produced");
+            }
+            msg
+        }
+    }
+
     /// Return the message content as a string slice if it is valid UTF-8.
     pub fn as_str(&self) -> Option<&str> {
         str::from_utf8(self).ok()
