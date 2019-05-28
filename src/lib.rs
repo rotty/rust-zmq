@@ -445,6 +445,12 @@ impl Context {
         }
     }
 
+    /// Create a context builder, which allows to create a customized
+    /// context.
+    pub fn builder() -> ContextBuilder {
+        ContextBuilder::default()
+    }
+
     /// Create a new socket.
     ///
     /// Note that the returned socket keeps a an `Arc` reference to
@@ -464,6 +470,12 @@ impl Context {
         })
     }
 
+    // Internal interface to the `zmq_ctx_set` API.
+    fn set_option(&mut self, option_name: c_int, option_value: c_int) -> Result<()> {
+        zmq_try!(unsafe { zmq_sys::zmq_ctx_set(self.raw.ctx, option_name, option_value) });
+        Ok(())
+    }
+
     /// Try to destroy the context. This is different than the destructor; the
     /// destructor will loop when zmq_ctx_destroy returns EINTR.
     pub fn destroy(&mut self) -> Result<()> {
@@ -474,6 +486,73 @@ impl Context {
 impl Default for Context {
     fn default() -> Self {
         Context::new()
+    }
+}
+
+#[derive(Default)]
+pub struct ContextBuilder {
+    blocky: Option<bool>,
+    io_threads: Option<c_int>,
+    max_msg_size: Option<c_int>,
+    max_sockets: Option<c_int>,
+    ipv6: Option<bool>,
+}
+
+impl ContextBuilder {
+    /// Set the `BLOCKY` option.
+    pub fn blocky(&mut self, value: bool) -> &mut Self {
+        self.blocky = Some(value);
+        self
+    }
+
+    /// Set the `IO_THREADS` option,
+    pub fn io_threads(&mut self, value: u32) -> &mut Self {
+        self.io_threads = Self::checked_u32(value, "number of I/O threads");
+        self
+    }
+
+    /// Set the `MAX_MSGSZ` option.
+    pub fn max_msg_size(&mut self, value: u32) -> &mut Self {
+        self.max_msg_size = Self::checked_u32(value, "maximum message size");
+        self
+    }
+
+    /// Set the `MAX_SOCKETS` option.
+    pub fn max_sockets(&mut self, value: u32) -> &mut Self {
+        self.max_sockets = Self::checked_u32(value, "maximum number of sockets");
+        self
+    }
+
+    /// Set the `IPV6` option.
+    pub fn ipv6(&mut self, value: bool) -> &mut Self {
+        self.ipv6 = Some(value);
+        self
+    }
+
+    pub fn finish(&mut self) -> Result<Context> {
+        use Constants::*;
+
+        let mut ctx = Context::default();
+        if let Some(blocky) = self.blocky {
+            ctx.set_option(ZMQ_BLOCKY.to_raw(), blocky as c_int)?;
+        }
+        if let Some(io_threads) = self.io_threads {
+            ctx.set_option(ZMQ_IO_THREADS.to_raw(), io_threads)?;
+        }
+
+        Ok(ctx)
+    }
+
+    fn checked_u32(value: u32, msg: &str) -> Option<c_int> {
+        if value > c_int::max_value() as u32 {
+            panic!(
+                "Value out of range for {}: {}, maximum is {}",
+                msg,
+                value,
+                c_int::max_value()
+            );
+        }
+        Some(value as c_int)
     }
 }
 
