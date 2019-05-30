@@ -196,7 +196,7 @@ impl From<Box<[u8]>> for Message {
                     msg,
                     raw as *mut c_void,
                     n,
-                    drop_msg_content_box as *mut zmq_sys::zmq_free_fn,
+                    Some(drop_msg_content_box),
                     ptr::null_mut(),
                 )
             })
